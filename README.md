@@ -9,7 +9,7 @@ Two environments share the same design:
 
 - **Local** — Temporal on a [Rancher Desktop](https://rancherdesktop.io)
   Kubernetes cluster with an in-cluster PostgreSQL. This is what
-  [`RUNBOOK.md`](RUNBOOK.md) walks you through, end to end, in about 15 minutes.
+  [`docs/runbook.md`](docs/runbook.md) walks you through, end to end, in about 15 minutes.
 - **Production (GCP)** — the same chart and topology on Google Kubernetes Engine
   (GKE) with Cloud SQL for PostgreSQL. See [`deploy/gcp/`](deploy/gcp/) for the
   differences. The design rationale lives in the companion research repo
@@ -44,24 +44,30 @@ auth/
   tokengen/                   # dependency-free Go tool: signing key + JWKS + tokens
   out/                        # generated key/JWKS/tokens (gitignored — never committed)
 workers/
-  team-a/                     # provisioning-pipeline worker + workflow
-  team-b/                     # order-processing worker + workflow
+  team-a/                     # provisioning-pipeline worker + workflow (+ unit test)
+  team-b/                     # order-processing worker + workflow (+ unit test)
   internal/temporalclient/    # shared client (attaches the bearer token)
   Dockerfile                  # in-cluster/production worker image
-RUNBOOK.md                    # step-by-step local setup
+docs/
+  runbook.md                  # platform operators: stand up the cluster locally
+  writing-workflows.md        # team developers: write, run, test, debug a workflow
+  test-plan.md                # what this repo tests, at which level, and how to run it
 ```
 
 ## Guides
 
-- [`RUNBOOK.md`](RUNBOOK.md) — **platform operators**: stand up the whole cluster
+- [`docs/runbook.md`](docs/runbook.md) — **platform operators**: stand up the whole cluster
   locally on Rancher Desktop, end to end.
 - [`docs/writing-workflows.md`](docs/writing-workflows.md) — **team developers**:
   write, run, test, and debug your own workflow from scratch, using team-a as the
   worked example.
+- [`docs/test-plan.md`](docs/test-plan.md) — **what this repo tests**: unit,
+  determinism/replay, end-to-end, RBAC, and smoke checks, at which level and how
+  to run each.
 
 ## Quick start
 
-Follow [`RUNBOOK.md`](RUNBOOK.md). In short: create the namespace and DB secret,
+Follow [`docs/runbook.md`](docs/runbook.md). In short: create the namespace and DB secret,
 deploy PostgreSQL, install the Temporal Helm chart, create the two namespaces,
 run the workers, start some workflows, then layer on RBAC.
 

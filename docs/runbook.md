@@ -102,8 +102,8 @@ temporal operator namespace list --address 127.0.0.1:7233 | grep Name
 
 Each team owns a worker that executes its workflow code. Build both and run them
 as host processes that connect through the port-forward. (In production these are
-Kubernetes Deployments — see [`workers/Dockerfile`](workers/Dockerfile) and
-[`deploy/gcp/`](deploy/gcp/).)
+Kubernetes Deployments — see [`workers/Dockerfile`](../workers/Dockerfile) and
+[`deploy/gcp/`](../deploy/gcp/).)
 
 ```bash
 cd workers
@@ -254,7 +254,7 @@ cd ../../..
 **On the UI under RBAC:** the Web UI is pointed at the `internal-frontend`
 (which bypasses auth) so it keeps full visibility on a laptop without an OIDC
 login. In production the UI authenticates users via OIDC and talks to the
-authorized frontend instead — see [`deploy/gcp/`](deploy/gcp/).
+authorized frontend instead — see [`deploy/gcp/`](../deploy/gcp/).
 
 **On delete:** Temporal classifies `DeleteWorkflowExecution` as a *write*, so a
 `:write` token could delete its own team's workflows. Reserving delete strictly

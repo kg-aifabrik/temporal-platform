@@ -5,7 +5,7 @@ Temporal cluster. It uses **team-a** — the bare-metal → OS → Kubernetes
 provisioning pipeline in [`workers/team-a`](../workers/team-a) — as the running
 example, and builds up to it from a bare minimum.
 
-Assumes the platform is already up (see [`RUNBOOK.md`](../RUNBOOK.md)). You do
+Assumes the platform is already up (see [`runbook.md`](runbook.md)). You do
 **not** operate the cluster; you write code that connects to it.
 
 ## The mental model (read this first)
@@ -39,7 +39,7 @@ Before writing code, get these from whoever runs the cluster:
   via `kubectl -n temporal port-forward svc/temporal-frontend 7233:7233`.
 - **Your namespace** — your team's isolated space, e.g. `team-a`.
 - **A write token** — if RBAC is on, a JWT with `team-a:write` so your worker can
-  poll and your starts are allowed. (How these are minted: [`RUNBOOK.md`](../RUNBOOK.md) §6.)
+  poll and your starts are allowed. (How these are minted: [`runbook.md`](runbook.md) §6.)
 
 Point the client at them with environment variables (the shared client in
 [`workers/internal/temporalclient`](../workers/internal/temporalclient) reads
