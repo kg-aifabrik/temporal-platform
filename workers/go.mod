@@ -2,7 +2,10 @@ module github.com/kg-aifabrik/temporal-platform/workers
 
 go 1.26
 
-require go.temporal.io/sdk v1.46.0
+require (
+	github.com/stretchr/testify v1.10.0
+	go.temporal.io/sdk v1.46.0
+)
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
@@ -17,7 +20,6 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/robfig/cron v1.2.0 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
-	github.com/stretchr/testify v1.10.0 // indirect
 	go.temporal.io/api v1.63.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect

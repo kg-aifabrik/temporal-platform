@@ -51,6 +51,14 @@ workers/
 RUNBOOK.md                    # step-by-step local setup
 ```
 
+## Guides
+
+- [`RUNBOOK.md`](RUNBOOK.md) — **platform operators**: stand up the whole cluster
+  locally on Rancher Desktop, end to end.
+- [`docs/writing-workflows.md`](docs/writing-workflows.md) — **team developers**:
+  write, run, test, and debug your own workflow from scratch, using team-a as the
+  worked example.
+
 ## Quick start
 
 Follow [`RUNBOOK.md`](RUNBOOK.md). In short: create the namespace and DB secret,
