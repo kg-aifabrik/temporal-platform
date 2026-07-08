@@ -1,9 +1,10 @@
 # Writing your first workflow (a team guide)
 
 How a team goes from nothing to a running, debuggable workflow on the shared
-Temporal cluster. It uses **team-a** — the bare-metal → OS → Kubernetes
-provisioning pipeline in [`workers/team-a`](../workers/team-a) — as the running
-example, and builds up to it from a bare minimum.
+Temporal cluster. It follows a brand-new team, **team-c** (three members), from
+onboarding through build, test, commit, and debug — and points at **team-a**
+(the bare-metal → OS → Kubernetes provisioning pipeline in
+[`workers/team-a`](../workers/team-a)) as the mature reference to grow toward.
 
 Assumes the platform is already up (see [`runbook.md`](runbook.md)). You do
 **not** operate the cluster; you write code that connects to it.
@@ -31,40 +32,92 @@ task on your team's queue → your *worker* picks it up, runs the workflow, whic
 *schedules activities* back onto the queue → your worker runs those too → the
 workflow completes and its result + full history are stored.
 
-## What the platform team gives you
+## Onboarding a new team — worked example: team-c (3 members)
 
-Before writing code, get these from whoever runs the cluster:
+Bringing a team onto the shared cluster is two roles' work: a **platform
+operator** creates the team's space and credentials once, then the **team**
+builds against it. Here we onboard **team-c** with three members — erin, frank,
+and grace.
 
-- **Frontend address** — where clients connect. Locally that's `127.0.0.1:7233`
-  via `kubectl -n temporal port-forward svc/temporal-frontend 7233:7233`.
-- **Your namespace** — your team's isolated space, e.g. `team-a`.
-- **A write token** — if RBAC is on, a JWT with `team-a:write` so your worker can
-  poll and your starts are allowed. (How these are minted: [`runbook.md`](runbook.md) §6.)
+### Operator: create the namespace
 
-Point the client at them with environment variables (the shared client in
-[`workers/internal/temporalclient`](../workers/internal/temporalclient) reads
-these):
+A namespace is the team's isolated space — its own workflows, task queues, and
+(under RBAC) access. One command:
+
+```bash
+temporal operator namespace create --address 127.0.0.1:7233 --retention 72h \
+  --description "Team C workflows" team-c
+```
+
+(Production also sets per-namespace rate limits here, so one team can't starve
+the others — see the research repo's `multi-tenancy-setup.md`. Not needed locally.)
+
+### Operator: issue credentials
+
+Under RBAC every caller needs a token. Locally these are minted by
+[`auth/tokengen`](../auth/tokengen); add team-c's identities to its list — three
+members who can read every team and write their own, plus one worker token:
+
+```go
+// auth/tokengen/main.go — add to `identities`
+{"erin", "erin@corp.local", []string{"temporal-system:read", "team-c:write"}},
+{"frank", "frank@corp.local", []string{"temporal-system:read", "team-c:write"}},
+{"grace", "grace@corp.local", []string{"temporal-system:read", "team-c:write"}},
+{"worker-team-c", "worker-team-c", []string{"team-c:write"}},
+```
+
+Regenerate:
+
+```bash
+go run ./auth/tokengen -out ./auth/out    # adds tokens/{erin,frank,grace,worker-team-c}.jwt
+```
+
+Nothing else on the cluster changes: tokengen reuses the existing signing key, so
+the new tokens are signed by a key the frontend already trusts — no JWKS update,
+no Temporal restart. (In production the identity provider does this: add the
+three people to a `team-c` group that maps to the `team-c:write` claim — again,
+no change to Temporal.)
+
+### The handoff
+
+The operator hands team-c four things; everything the team runs is configured
+from them:
+
+| What | Value for team-c |
+|---|---|
+| Frontend address | `127.0.0.1:7233` (via `kubectl -n temporal port-forward svc/temporal-frontend 7233:7233`) |
+| Namespace | `team-c` |
+| Task queue (convention `<team>-tq`) | `team-c-tq` |
+| Tokens | `worker-team-c.jwt` for the worker + one per member (`erin.jwt`, …) |
+
+The shared client in [`workers/internal/temporalclient`](../workers/internal/temporalclient)
+reads these from the environment:
 
 ```bash
 export TEMPORAL_ADDRESS=127.0.0.1:7233
-export TEMPORAL_NAMESPACE=team-a
-export TEMPORAL_AUTH_TOKEN=$(cat auth/out/tokens/worker-team-a.jwt)   # only if RBAC is on
+export TEMPORAL_NAMESPACE=team-c
+export TEMPORAL_AUTH_TOKEN=$(cat auth/out/tokens/worker-team-c.jwt)   # only if RBAC is on
 ```
 
 ---
 
-## 0 → 1: the smallest thing that works
+## 0 → 1: team-c's first workflow
 
 Start with one activity and a one-line workflow. Get *that* running before
 adding anything.
 
-### Step 1 — a module
+### Step 1 — a package for your team
+
+team-a and team-b live as `package main` under the one `workers` Go module. Add
+yours the same way — no new module:
 
 ```bash
-mkdir myteam && cd myteam
-go mod init github.com/kg-aifabrik/temporal-platform/workers/myteam
-go get go.temporal.io/sdk@latest
+mkdir workers/team-c    # main.go (worker + workflow) and workflow_test.go go here
 ```
+
+(If your team keeps its workers in its **own repo** instead, `go mod init` there
+and `go get go.temporal.io/sdk@latest` — the worker connects to the same cluster
+either way.)
 
 ### Step 2 — an activity
 
@@ -103,7 +156,7 @@ func main() {
     c, _ := temporalclient.New()   // reads TEMPORAL_ADDRESS/NAMESPACE/AUTH_TOKEN
     defer c.Close()
 
-    w := worker.New(c, "myteam-tq", worker.Options{})
+    w := worker.New(c, "team-c-tq", worker.Options{})
     w.RegisterWorkflow(GreetingWorkflow)
     w.RegisterActivity(Greet)
     _ = w.Run(worker.InterruptCh())
@@ -112,14 +165,18 @@ func main() {
 
 ### Step 5 — run it and start one
 
+With the environment exported from the handoff (`TEMPORAL_NAMESPACE=team-c` and,
+under RBAC, `TEMPORAL_AUTH_TOKEN=$(cat auth/out/tokens/worker-team-c.jwt)`):
+
 ```bash
-go run .    # worker logs: "Started Worker ... TaskQueue myteam-tq"
+cd workers && go run ./team-c   # worker logs: "Started Worker ... TaskQueue team-c-tq"
 
-# in another terminal:
-temporal workflow start -n team-a --task-queue myteam-tq \
-  --type GreetingWorkflow --workflow-id greet-1 --input '"world"'
+# in another terminal — add a member token under RBAC:
+temporal workflow start -n team-c --task-queue team-c-tq \
+  --type GreetingWorkflow --workflow-id greet-1 --input '"world"' \
+  --grpc-meta "authorization=Bearer $(cat auth/out/tokens/erin.jwt)"
 
-temporal workflow show -n team-a --workflow-id greet-1   # -> result: "hello world"
+temporal workflow show -n team-c --workflow-id greet-1   # -> result: "hello world"
 ```
 
 That's 0 → 1. Everything else is making the workflow do more.
@@ -184,6 +241,10 @@ cd workers && go test ./team-a/ -v
 # --- PASS: TestProvisionClusterWorkflow (0.04s)
 ```
 
+team-c writes its own `workers/team-c/workflow_test.go` in exactly this shape —
+copy team-a's or team-b's test as the template. The whole suite runs with
+`go test ./...` from `workers/`.
+
 **Replay test (the safety net).** Before deploying a code change, replay real
 production histories against the new code; if the logic diverges, the replayer
 fails — catching non-determinism before it reaches a running workflow. Wire this
@@ -191,10 +252,38 @@ into continuous integration (CI) so a bad change never merges.
 
 ---
 
+## Commit your work
+
+What lands in the repo — and what must never:
+
+- **Commit:** your team's code under `workers/team-c/` (worker, workflow,
+  activities, and `workflow_test.go`). Locally, also commit the team-c
+  identities you added to [`auth/tokengen/main.go`](../auth/tokengen/main.go) —
+  that's the source of truth for who has access in the demo. In production that
+  lives in the identity provider, not the repo.
+- **Never commit:** minted tokens or the signing key. `auth/out/` and
+  `workers/bin/` are already in [`.gitignore`](../.gitignore); tokens are
+  throwaway and regenerated with `go run ./auth/tokengen`.
+
+The gate before a pull request is green tests, then a branch and PR:
+
+```bash
+cd workers && go test ./...     # your team-c test passes alongside team-a/team-b
+cd ..
+git checkout -b team-c-onboarding
+git add workers/team-c auth/tokengen/main.go
+git commit -m "team-c: onboard with greeting workflow"
+git push -u origin team-c-onboarding
+```
+
+---
+
 ## Debugging a workflow
 
 When a run misbehaves, work from the outside in: the UI shows *what* happened,
 the CLI gets you *details*, and the failure's shape tells you *where* to look.
+The examples below use team-a because it has runs to inspect; for team-c, swap
+in `-n team-c` and a team-c member token (e.g. `erin.jwt`).
 
 ### Start in the Web UI
 
@@ -259,7 +348,8 @@ workflows finish on the code that started them. See [`deploy/gcp/`](../deploy/gc
 
 ## Checklist
 
-- [ ] Namespace, task queue, and (if RBAC) a write token from the platform team.
+- [ ] **Onboarded**: namespace created, and (if RBAC) member + worker tokens issued.
+- [ ] Namespace, task queue (`<team>-tq`), and token wired into the worker's environment.
 - [ ] Workflow is deterministic — all I/O, clocks, randomness in activities.
 - [ ] Activities have timeouts and a retry policy.
 - [ ] `workflow.Sleep`, not `time.Sleep`, inside workflows.

@@ -59,8 +59,8 @@ docs/
 - [`docs/runbook.md`](docs/runbook.md) — **platform operators**: stand up the whole cluster
   locally on Rancher Desktop, end to end.
 - [`docs/writing-workflows.md`](docs/writing-workflows.md) — **team developers**:
-  write, run, test, and debug your own workflow from scratch, using team-a as the
-  worked example.
+  onboard a new team (team-c), then write, run, test, commit, and debug workflows;
+  team-a is the mature reference example.
 - [`docs/test-plan.md`](docs/test-plan.md) — **what this repo tests**: unit,
   determinism/replay, end-to-end, RBAC, and smoke checks, at which level and how
   to run each.
