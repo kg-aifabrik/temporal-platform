@@ -1,0 +1,34 @@
+# Auth overlay — layered ON TOP of 20-temporal-values.yaml to switch on
+# JWT-based authorization:
+#
+#   helm upgrade temporal temporal/temporal -n temporal \
+#     -f deploy/local/20-temporal-values.yaml \
+#     -f deploy/local/21-temporal-values-auth.yaml
+#
+# What this turns on:
+#  - The built-in default authorizer + default JWT claim mapper (no custom code,
+#    no server rebuild). The frontend validates every request's bearer token
+#    against the JWKS and enforces the `permissions` claim per API call.
+#  - Internal/system traffic keeps flowing because it goes through
+#    internal-frontend (enabled in the base values), which does not run the
+#    authorizer — so no internode mTLS is needed for this local setup.
+
+server:
+  config:
+    authorization:
+      jwtKeyProvider:
+        # The frontend GETs this URL and expects a JWKS document.
+        keySourceURIs:
+          - http://temporal-jwks.temporal.svc/jwks.json
+        refreshInterval: 1m
+      permissionsClaimName: permissions
+      authorizer: default
+      claimMapper: default
+
+web:
+  # LOCAL-ONLY shortcut: point the Web UI at the internal-frontend, which
+  # bypasses authorization, so the UI keeps full visibility without needing an
+  # OIDC login flow on a laptop. In PRODUCTION the UI instead authenticates
+  # users via OIDC and talks to the external (authorized) frontend — see
+  # deploy/gcp/. Do not carry this setting to production.
+  temporalAddress: "temporal-internal-frontend:7236"

@@ -1,0 +1,10 @@
+# Kubernetes namespace that holds the whole Temporal platform (server, UI,
+# admin tools, and the in-cluster PostgreSQL) for the local Rancher Desktop
+# setup. Team workflow namespaces (team-a, team-b) are Temporal namespaces,
+# which are a different concept and live inside the Temporal server, not here.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: temporal
+  labels:
+    app.kubernetes.io/part-of: temporal-platform

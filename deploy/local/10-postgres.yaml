@@ -1,0 +1,109 @@
+# In-cluster PostgreSQL for the LOCAL setup only.
+#
+# This is deliberately a single, small, single-replica StatefulSet on Rancher
+# Desktop's default `local-path` StorageClass. It is NOT how production runs:
+# on GCP the state store is Cloud SQL for PostgreSQL (regional HA), and nothing
+# resembling this file is applied there. See deploy/gcp/ for the production
+# shape.
+#
+# The password is NOT committed. Create the Secret it references before applying
+# (see RUNBOOK.md):
+#   kubectl -n temporal create secret generic temporal-db \
+#     --from-literal=password=<local-dev-password>
+#
+# Two databases are created on first boot: `temporal` (core) and
+# `temporal_visibility` (search index). The Temporal Helm chart's schema Jobs
+# populate the tables in both.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: temporal
+data:
+  # POSTGRES_DB below creates `temporal`; this script adds the visibility DB.
+  init-visibility.sql: |
+    CREATE DATABASE temporal_visibility;
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: temporal
+  labels:
+    app: postgres
+spec:
+  # Headless service: gives the StatefulSet pod a stable DNS name
+  # postgres-0.postgres.temporal.svc; the plain `postgres` name also resolves.
+  clusterIP: None
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: temporal
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_USER
+              value: temporal
+            - name: POSTGRES_DB
+              value: temporal
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: temporal-db
+                  key: password
+            # Keep the data dir in a subdir so the PVC mount root isn't the PGDATA.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "temporal", "-d", "temporal"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: init
+          configMap:
+            name: postgres-init
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 5Gi

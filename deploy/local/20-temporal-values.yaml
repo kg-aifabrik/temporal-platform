@@ -1,0 +1,78 @@
+# Helm values for the LOCAL Temporal server on Rancher Desktop.
+#
+# Chart: temporal/temporal (>= 1.5.0, Temporal server v1.31.1).
+# Persistence points at the in-cluster PostgreSQL from 10-postgres.yaml.
+# Auth is layered on separately by 21-temporal-values-auth.yaml so the base
+# cluster can be brought up and verified first.
+#
+# Install:
+#   helm install temporal temporal/temporal -n temporal \
+#     -f deploy/local/20-temporal-values.yaml
+
+# The bundled Cassandra/Elasticsearch/Prometheus/Grafana sub-charts were removed
+# in chart v1.0.0, so there is nothing to disable here — the chart installs only
+# server components. We bring our own PostgreSQL.
+
+# Temporal server v1.31 images: turn off the 1.29-compatibility shims.
+shims:
+  dockerize: false
+  elasticsearchTool: false
+
+server:
+  # One replica per service is right for a laptop. Production raises these.
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
+  # internal-frontend carries internal/system traffic (the worker service, schema
+  # jobs, admintools) so that when authorization is enabled on the external
+  # frontend, internal calls bypass it — avoiding the internode mTLS the default
+  # claim mapper would otherwise require. Enabling it now keeps the baseline and
+  # auth stages identical in topology.
+  # NOTE: this key lives UNDER `server` (the chart reads server."internal-frontend").
+  internal-frontend:
+    enabled: true
+
+  config:
+    persistence:
+      # IMMUTABLE after first deploy. 512 is Temporal's small-cluster default.
+      numHistoryShards: 512
+      defaultStore: default
+      visibilityStore: visibility
+      datastores:
+        # Core store: event histories, task queues, timers, mutable state.
+        default:
+          sql:
+            pluginName: postgres12
+            databaseName: temporal
+            connectAddr: "postgres:5432"
+            connectProtocol: "tcp"
+            user: temporal
+            existingSecret: temporal-db
+            secretKey: password
+            maxConns: 20
+            maxIdleConns: 20
+            maxConnLifetime: "1h"
+        # Visibility store: the searchable index. Runs on PostgreSQL advanced
+        # visibility (GA since server v1.20) — no Elasticsearch needed.
+        visibility:
+          sql:
+            pluginName: postgres12
+            databaseName: temporal_visibility
+            connectAddr: "postgres:5432"
+            connectProtocol: "tcp"
+            user: temporal
+            existingSecret: temporal-db
+            secretKey: password
+            maxConns: 10
+            maxIdleConns: 10
+            maxConnLifetime: "1h"
+
+# Web UI. Reached via `kubectl port-forward` in the runbook (ClusterIP).
+web:
+  enabled: true
+
+admintools:
+  enabled: true
