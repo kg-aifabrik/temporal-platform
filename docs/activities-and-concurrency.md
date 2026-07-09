@@ -11,7 +11,8 @@ For the rest of this document, assume the model the platform has settled on:
 **provisioning is driven by an API, one host per call.**
 
 - A caller hits the provisioning API once per machine. The API starts one
-  Temporal workflow for that host and returns immediately.
+  Temporal workflow for that machine (keyed by its asset serial number) and
+  returns immediately.
 - For 1000 machines, the API is called 1000 times — 1000 independent workflows.
 - We do **not** know the total volume or the arrival rate in advance; requests
   can arrive in bursts.
@@ -29,7 +30,8 @@ Here is how a provisioning request becomes running work:
 Walking the flow:
 
 1. The **API facade** takes a provision request and calls the Temporal
-   **Frontend** — `StartWorkflow`, with the host ID as the workflow ID.
+   **Frontend** — `StartWorkflow`, with the machine's asset serial number as the
+   workflow ID.
 2. The Frontend **persists** the workflow's first event to the database and
    returns. The request is now durable; it will run even if everything
    downstream is busy.
@@ -68,19 +70,22 @@ Temporal cluster and the image servers (network bandwidth for OS images)?"*
 Starting a workflow is cheap and durable, so **accept every request** and put the
 throttle on the step that stresses your resources — the install.
 
-**Accept and dedupe at the API.** Each call starts one per-host workflow and
-returns. Use the host ID as the workflow ID so retries don't double-provision:
+**Accept and dedupe at the API.** Each call starts one workflow for one machine.
+Use the machine's **asset serial number** as the workflow ID — the serial is
+unique to the physical server, so every request for that machine maps to the same
+workflow ID:
 
 ```go
 c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
-    ID:                       "provision-" + hostID,   // one workflow per host
+    ID:                       "provision-" + serial,   // asset serial number — unique per machine
     TaskQueue:                "provisioning-tq",
     WorkflowIDConflictPolicy: enums.WORKFLOW_ID_CONFLICT_POLICY_USE_EXISTING, // idempotent
-}, ProvisionMachineWorkflow, hostID)
+}, ProvisionMachineWorkflow, serial)
 ```
 
-`USE_EXISTING` makes a duplicate call for an in-flight host attach to the running
-workflow instead of erroring — so the API is retry-safe and never has to reject.
+`USE_EXISTING` means a second request carrying the same serial number attaches to
+the workflow already provisioning that machine, so the API is retry-safe and each
+machine is provisioned once.
 
 **Put the throttle on the install step.** Run `InstallOS` on a dedicated install
 task queue whose worker fleet has a fixed total capacity — say 100. However many
@@ -251,6 +256,6 @@ on the errors retrying can't fix.
 an earlier point and replay forward with the new code, instead of starting over:
 
 ```bash
-temporal workflow reset -n team-a --workflow-id provision-host-42 \
+temporal workflow reset -n team-a --workflow-id provision-SN-4C2K3D9 \
   --type LastWorkflowTask --reason "fixed InstallOS bug"
 ```
