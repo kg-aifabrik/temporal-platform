@@ -1,9 +1,9 @@
 # The execution model, and common concurrency scenarios
 
 The next level after [`writing-workflows.md`](writing-workflows.md): how work
-actually flows through Temporal, and how to handle the concurrency and
-reliability situations a team hits in production. Examples use team-a's
-provisioning workflow.
+flows through Temporal, and how to handle the concurrency and reliability
+situations a team hits in production. Examples use team-a's provisioning
+workflow.
 
 ## The working model we assume
 
@@ -22,8 +22,7 @@ here, a stream of independent single-host workflows.
 
 ## The mental model
 
-Understanding how a request becomes running work is the foundation for
-everything else. This is the picture worth holding in your head:
+Here is how a provisioning request becomes running work:
 
 ![How a provisioning request flows through Temporal](diagrams/provisioning-flow.png)
 
@@ -43,15 +42,14 @@ Walking the flow:
 5. The result is persisted, the server schedules the next Workflow Task, the
    worker resumes your code, and the loop repeats until the workflow completes.
 
-Two points worth getting straight:
+Two things this flow shows:
 
-- **A workflow is not pre-sliced into activities.** Your workflow code *runs* on
-  a worker, and it schedules each activity when the code reaches it. The server
-  and database don't run your code — they persist state and hand out tasks.
-- **The task queue is a durable buffer, not a fire-hose.** Tasks wait there until
-  a worker has capacity. That buffering is exactly what lets you throttle work
-  without losing it (Scenario 1), and what makes a workflow's state survive a
-  crash (Scenario 2).
+- **Your workflow code runs on a worker and schedules each activity as it reaches
+  it.** The server and database persist state and hand out tasks; the workers run
+  your code.
+- **The task queue is a durable buffer.** Tasks wait there until a worker has
+  capacity. That buffering is what lets you throttle work without losing it
+  (Scenario 1), and what makes a workflow's state survive a crash (Scenario 2).
 
 Three facts fall out of this model and drive the scenarios below:
 
@@ -67,9 +65,8 @@ Three facts fall out of this model and drive the scenarios below:
 *"A flood of provision calls just arrived. How do I keep from exhausting the
 Temporal cluster and the image servers (network bandwidth for OS images)?"*
 
-The instinct is to rate-limit the API. Don't. Starting a workflow is cheap and
-durable, so **accept every request** and throttle the step that actually stresses
-your resources — the install.
+Starting a workflow is cheap and durable, so **accept every request** and put the
+throttle on the step that stresses your resources — the install.
 
 **Accept and dedupe at the API.** Each call starts one per-host workflow and
 returns. Use the host ID as the workflow ID so retries don't double-provision:
@@ -85,7 +82,7 @@ c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
 `USE_EXISTING` makes a duplicate call for an in-flight host attach to the running
 workflow instead of erroring — so the API is retry-safe and never has to reject.
 
-**Throttle the install, not the API.** Run `InstallOS` on a dedicated install
+**Put the throttle on the install step.** Run `InstallOS` on a dedicated install
 task queue whose worker fleet has a fixed total capacity — say 100. However many
 workflows are open, only 100 installs run at once; the rest wait in the task
 queue backlog and start as slots free. That backlog *is* your backpressure —
@@ -191,10 +188,10 @@ func InstallOSAllNodes(ctx context.Context, nodes []string) error {
 - *Within one activity:* heartbeat details, as above, when a single step is long
   and you don't want to split it.
 
-**Very long or high-volume workflows:** history isn't infinite (tens of thousands
-of events is the practical ceiling). A workflow that loops forever or fans out to
-huge numbers should call `workflow.NewContinueAsNewError` to start a fresh
-execution with a compact state, keeping history small.
+**Very long or high-volume workflows:** history has a practical ceiling (tens of
+thousands of events). A workflow that loops for a long time or fans out to huge
+numbers should call `workflow.NewContinueAsNewError` to start a fresh execution
+with a compact state, keeping history small.
 
 ---
 
@@ -227,10 +224,9 @@ on the errors retrying can't fix.
   ```
 
 - **Workflow-code (workflow task) failures** — a panic or a bug in workflow code
-  fails the *workflow task*, not the workflow. Temporal keeps retrying the task,
-  so the workflow *pauses* rather than dying. Fix and redeploy the worker and it
-  picks up where it left off. This is why a bad deploy wedges workflows instead of
-  losing them.
+  fails the *workflow task*. Temporal keeps retrying the task, so the workflow
+  pauses and its state is preserved. Fix and redeploy the worker and it picks up
+  where it left off — a bad deploy costs you a pause, not the workflow.
 
 **What you must handle:**
 
