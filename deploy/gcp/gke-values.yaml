@@ -1,0 +1,103 @@
+# Helm values for Temporal on GKE, backed by Cloud SQL for PostgreSQL with IAM
+# database authentication (no stored password).
+#
+# The Temporal server pods run a Cloud SQL Auth Proxy as a native sidecar: it
+# authenticates to Cloud SQL as the pod's Workload Identity (--auto-iam-authn)
+# and exposes Postgres on 127.0.0.1:5432, so Temporal connects with the IAM
+# username and no password. Only the SERVER talks to the database; workers reach
+# the frontend over gRPC and need none of this.
+#
+# Placeholders are substituted at deploy time (see docs/runbook-gke-cloud-sql.md):
+#   __TEMPORAL_GSA_EMAIL__         temporal-sql@<project>.iam.gserviceaccount.com
+#   __TEMPORAL_DB_IAM_USER__       temporal-sql@<project>.iam   (the GSA email minus ".gserviceaccount.com")
+#   __CLOUD_SQL_CONNECTION_NAME__  <project>:<region>:<instance>  (from `terraform output` / gcloud)
+#
+#   helm install temporal temporal/temporal -n temporal -f deploy/gcp/gke-values.yaml
+
+# Temporal server v1.31 images — turn off the 1.29-compat shims.
+shims:
+  dockerize: false
+  elasticsearchTool: false
+
+# The server's Kubernetes service account, Workload-Identity-bound to the GSA
+# that holds roles/cloudsql.client + cloudsql.instanceUser. The proxy sidecar
+# picks up this identity from the metadata server.
+serviceAccount:
+  create: true
+  name: temporal
+  extraAnnotations:
+    iam.gke.io/gcp-service-account: __TEMPORAL_GSA_EMAIL__
+
+server:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+  # Cloud SQL Auth Proxy as a native sidecar (restartPolicy: Always so the pod's
+  # main containers can still terminate). --auto-iam-authn makes the proxy fetch
+  # an OAuth token for the Workload Identity and use it as the DB password.
+  additionalInitContainers:
+    - name: cloud-sql-proxy
+      image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.1
+      restartPolicy: Always
+      args:
+        - "--private-ip"
+        - "--auto-iam-authn"
+        - "--address=127.0.0.1"
+        - "--port=5432"
+        - "__CLOUD_SQL_CONNECTION_NAME__"
+      securityContext:
+        runAsNonRoot: true
+        allowPrivilegeEscalation: false
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+
+  config:
+    persistence:
+      # IMMUTABLE after first deploy. 512 is Temporal's small-cluster default.
+      numHistoryShards: 512
+      defaultStore: default
+      visibilityStore: visibility
+      datastores:
+        # Both stores connect to the local Cloud SQL Auth Proxy as the IAM user,
+        # with no password (the proxy injects the token).
+        default:
+          sql:
+            pluginName: postgres12
+            databaseName: temporal
+            connectAddr: "127.0.0.1:5432"
+            connectProtocol: "tcp"
+            user: __TEMPORAL_DB_IAM_USER__
+            maxConns: 20
+            maxIdleConns: 20
+            maxConnLifetime: "1h"
+        visibility:
+          sql:
+            pluginName: postgres12
+            databaseName: temporal_visibility
+            connectAddr: "127.0.0.1:5432"
+            connectProtocol: "tcp"
+            user: __TEMPORAL_DB_IAM_USER__
+            maxConns: 10
+            maxIdleConns: 10
+            maxConnLifetime: "1h"
+
+  metrics:
+    serviceMonitor:
+      enabled: true
+      interval: 15s
+
+# Schema setup is run as a controlled one-off Job (with the same proxy sidecar),
+# because the chart's schema hook Job can't carry the Auth Proxy. See the runbook.
+schema:
+  useHelmHooks: false
+
+web:
+  enabled: true
+
+admintools:
+  enabled: true
