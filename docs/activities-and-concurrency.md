@@ -61,6 +61,13 @@ need it, pick one:
   }
   ```
 
+  **Scope: one workflow execution.** This limit is not per-pod or cluster-wide.
+  If ten provisioning workflows run at once, each gets its own limit of 3 — so up
+  to 30 `InstallOS` activities run across the fleet. To turn it into a real global
+  cap, either run the whole batch as a *single* workflow (one execution then
+  equals the whole job — see *Worked example* below) or enforce the limit with a
+  shared task-queue ceiling.
+
 - **Give the workflow type its own task queue** and a worker sized for it, then
   cap that queue with `TaskQueueActivitiesPerSecond`. A task queue is just a
   name, so this is cheap.
@@ -79,6 +86,68 @@ second and database queries per second per namespace) so no single team can
 overwhelm the shared cluster. That cap is per team (per namespace) and is set by
 the platform, not you — your worker settings tune throughput *up to* that ceiling.
 See the research repo's `multi-tenancy-setup.md`.
+
+## Worked example: 1000 machines, 100 installs at a time
+
+Goal: provision 1000 machines, but never more than 100 installs running at once,
+so the image servers and the cluster aren't overwhelmed. Use two layers — one for
+the *intended* limit, one as a *guardrail* that holds no matter what the workflow
+code does.
+
+**Layer 1 — the intended limit: one batch workflow with a semaphore.** Because a
+semaphore is scoped to a single execution, run the whole batch as *one* workflow.
+Its per-execution limit of 100 is then the global limit for the job:
+
+```go
+func ProvisionFleetWorkflow(ctx workflow.Context, machines []string) error {
+    sem := workflow.NewSemaphore(ctx, 100)   // at most 100 in flight for this job
+    wg := workflow.NewWaitGroup(ctx)
+    for _, m := range machines {
+        m := m
+        _ = sem.Acquire(ctx, 1)              // blocks the loop once 100 are running
+        wg.Add(1)
+        workflow.Go(ctx, func(ctx workflow.Context) {
+            defer wg.Done()
+            defer sem.Release(1)
+            // one child workflow per machine (allocate -> OS -> k8s)
+            _ = workflow.ExecuteChildWorkflow(ctx, ProvisionMachineWorkflow, m).Get(ctx, nil)
+        })
+    }
+    wg.Wait(ctx)
+    return nil
+}
+```
+
+`Acquire` blocks the loop once 100 are in flight, so machine 101 waits for one to
+finish. One execution means the 100 cap is global for this batch.
+
+**Layer 2 — the guardrail: a dedicated task queue with a hard ceiling.** The
+semaphore is workflow *logic*; a bug, or a second batch started by someone else,
+could still push past 100. Protect the shared resources regardless by running the
+install activity on its own task queue with a worker fleet whose total capacity is
+the ceiling:
+
+- `MaxConcurrentActivityExecutionSize` so the install worker pods can't run more
+  than the cap between them (e.g. one pod at 100, or a fixed per-pod × replica
+  budget). The worker simply stops pulling work at the limit.
+- `TaskQueueActivitiesPerSecond` as well if the image servers care about request
+  *rate*, not just concurrency.
+
+With the install activities isolated on their own queue and worker, even two
+batches running at once can't drive the image servers past the ceiling.
+
+**If several independent jobs must share one global budget** — not one batch, but
+many separate workflows across pods sharing a pool of 100 — the in-workflow
+semaphore isn't enough, because each job gets its own 100. Two options: rely on
+the Layer-2 task-queue ceiling (the worker fleet *is* the shared limit, which is
+usually the simplest answer), or run a **gatekeeper workflow** — one long-lived
+workflow holding 100 leases that the others signal to acquire and release before
+and after installing.
+
+**Keep history bounded.** One workflow driving 1000 children writes a few thousand
+history events, which is fine. Far beyond that (tens of thousands of events),
+process the machines in chunks and `workflow.NewContinueAsNewError` between chunks
+so the workflow's history stays small.
 
 ## Long-running activities (a 2-hour OS install)
 
