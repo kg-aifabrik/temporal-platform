@@ -1,5 +1,5 @@
 // Unit test for the order workflow, using the SDK's time-skipping test
-// environment with mocked activities. Mirrors team-a's test — the template
+// environment with mocked activities. Mirrors compute-provisioning's test — the template
 // every team follows (see docs/test-plan.md).
 package main
 

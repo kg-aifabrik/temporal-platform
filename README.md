@@ -20,12 +20,12 @@ Two environments share the same design:
 - Temporal server (frontend, history, matching, worker, internal-frontend) + Web
   UI on Kubernetes, backed by PostgreSQL — no Elasticsearch.
 - Two teams, each in its own namespace with its own task queue and workflow:
-  - **team-a** — a mock bare-metal → OS (Rafay) → Kubernetes provisioning
+  - **compute-provisioning** — a mock bare-metal → OS (Rafay) → Kubernetes provisioning
     pipeline (5 activities, a retry).
   - **team-b** — a 5-step "order processing" toy workflow.
 - **JWT role-based access control (RBAC)**, enforced live: any member can *read*
   every team's workflows, but can only *modify* their own team's; only an admin
-  can delete. Four members (alice, bob → team-a; carol, dave → team-b) plus an
+  can delete. Four members (alice, bob → compute-provisioning; carol, dave → team-b) plus an
   admin.
 
 ## Layout
@@ -46,7 +46,7 @@ auth/
   tokengen/                   # dependency-free Go tool: signing key + JWKS + tokens
   out/                        # generated key/JWKS/tokens (gitignored — never committed)
 workers/
-  team-a/                     # provisioning-pipeline worker + workflow (+ unit test)
+  compute-provisioning/                     # provisioning-pipeline worker + workflow (+ unit test)
   team-b/                     # order-processing worker + workflow (+ unit test)
   internal/temporalclient/    # shared client (attaches the bearer token)
   Dockerfile                  # in-cluster/production worker image
@@ -64,7 +64,7 @@ docs/
   locally on Rancher Desktop, end to end.
 - [`docs/writing-workflows.md`](docs/writing-workflows.md) — **team developers**:
   onboard a new team (team-c), then write, run, test, commit, and debug workflows;
-  team-a is the mature reference example.
+  compute-provisioning is the mature reference example.
 - [`docs/activities-and-concurrency.md`](docs/activities-and-concurrency.md) —
   **team developers, next level**: how work flows through Temporal (with a
   diagram), then three scenarios — a burst of requests (throttling), persisting

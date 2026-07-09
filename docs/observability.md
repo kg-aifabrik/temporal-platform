@@ -12,7 +12,7 @@ of the box:
 
 ## What the dashboards look like
 
-Captured from the local setup below after running ~110 workflows across team-a and
+Captured from the local setup below after running ~110 workflows across compute-provisioning and
 team-b.
 
 **Temporal Server Metrics** — actions, service/persistence availability, and
@@ -53,7 +53,7 @@ helm upgrade temporal temporal/temporal -n temporal \
   -f deploy/local/monitoring/temporal-metrics-values.yaml
 
 # 3. Workers in-cluster (so their SDK metrics can be scraped)
-docker build --build-arg TEAM=team-a -t temporal-worker-team-a:dev workers/
+docker build --build-arg TEAM=compute-provisioning -t temporal-worker-compute-provisioning:dev workers/
 docker build --build-arg TEAM=team-b -t temporal-worker-team-b:dev workers/
 kubectl $CTX apply -f deploy/local/40-workers.yaml
 
@@ -79,7 +79,7 @@ Quick checks that the pipeline is live:
 ```bash
 kubectl --context rancher-desktop -n monitoring \
   port-forward svc/monitoring-kube-prometheus-prometheus 9090:9090
-# http://localhost:9090/targets  →  temporal-* services + worker-team-a/b all UP
+# http://localhost:9090/targets  →  temporal-* services + worker-compute-provisioning/b all UP
 # query: sum(workflow_success)                                (server metrics)
 # query: sum(temporal_workflow_endtoend_latency_seconds_count) (SDK metrics)
 ```

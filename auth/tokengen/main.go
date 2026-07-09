@@ -49,12 +49,12 @@ type identity struct {
 
 // The four team members, one admin, and the two per-team worker service tokens.
 var identities = []identity{
-	{"alice", "alice@corp.local", []string{"temporal-system:read", "team-a:write"}},
-	{"bob", "bob@corp.local", []string{"temporal-system:read", "team-a:write"}},
+	{"alice", "alice@corp.local", []string{"temporal-system:read", "compute-provisioning:write"}},
+	{"bob", "bob@corp.local", []string{"temporal-system:read", "compute-provisioning:write"}},
 	{"carol", "carol@corp.local", []string{"temporal-system:read", "team-b:write"}},
 	{"dave", "dave@corp.local", []string{"temporal-system:read", "team-b:write"}},
 	{"admin", "admin@corp.local", []string{"temporal-system:admin"}},
-	{"worker-team-a", "worker-team-a", []string{"team-a:write"}},
+	{"worker-compute-provisioning", "worker-compute-provisioning", []string{"compute-provisioning:write"}},
 	{"worker-team-b", "worker-team-b", []string{"team-b:write"}},
 }
 

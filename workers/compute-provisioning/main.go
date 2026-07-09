@@ -1,4 +1,4 @@
-// Team A worker: a mock bare-metal → Kubernetes provisioning pipeline.
+// Compute-provisioning worker: a mock bare-metal → Kubernetes provisioning pipeline.
 //
 // The workflow orchestrates five activities that stand in for the real steps in
 // the data-center flow (allocate hardware → install OS via Rafay → configure
@@ -7,7 +7,7 @@
 // UI event history.
 //
 // Run:
-//   TEMPORAL_NAMESPACE=team-a go run ./team-a
+//   TEMPORAL_NAMESPACE=compute-provisioning go run ./compute-provisioning
 package main
 
 import (
@@ -131,7 +131,7 @@ func main() {
 	w.RegisterActivity(InstallKubernetes)
 	w.RegisterActivity(VerifyCluster)
 
-	log.Printf("team-a worker listening on task queue %q", TaskQueue)
+	log.Printf("compute-provisioning worker listening on task queue %q", TaskQueue)
 	if err := w.Run(worker.InterruptCh()); err != nil {
 		log.Fatalf("worker: %v", err)
 	}

@@ -25,12 +25,12 @@ timers fire instantly, no Temporal server is needed, and the test finishes in
 milliseconds. It asserts the workflow drives its activities in the right order
 and returns the right result — not the activity bodies (those are mocked).
 
-Files: [`workers/team-a/workflow_test.go`](../workers/team-a/workflow_test.go),
+Files: [`workers/compute-provisioning/workflow_test.go`](../workers/compute-provisioning/workflow_test.go),
 [`workers/team-b/workflow_test.go`](../workers/team-b/workflow_test.go).
 
 ```bash
 cd workers && go test ./...
-# ok  .../workers/team-a
+# ok  .../workers/compute-provisioning
 # ok  .../workers/team-b
 ```
 
@@ -64,13 +64,13 @@ Run it manually per [`runbook-local-rancher-desktop.md`](runbook-local-rancher-d
 ```bash
 A=127.0.0.1:7233
 # both teams' workflows reach Completed
-temporal workflow list --address $A -n team-a --query 'ExecutionStatus="Completed"'
+temporal workflow list --address $A -n compute-provisioning --query 'ExecutionStatus="Completed"'
 temporal workflow list --address $A -n team-b --query 'ExecutionStatus="Completed"'
 # the retry is visible: InstallOS ran a second attempt
-temporal workflow show --address $A -n team-a --workflow-id prov-edge-01 | grep -i "attempt 2"
+temporal workflow show --address $A -n compute-provisioning --workflow-id prov-edge-01 | grep -i "attempt 2"
 ```
 
-Expected: three team-a and (at least) one team-b execution Completed; `InstallOS`
+Expected: three compute-provisioning and (at least) one team-b execution Completed; `InstallOS`
 shows attempt 2. This was run during setup and passed.
 
 ## 4. Authorization (RBAC) tests 🔶
@@ -83,16 +83,16 @@ results.
 
 | Case | Command shape (token) | Namespace / action | Expected |
 |---|---|---|---|
-| No token | *(none)* | team-a / list | ❌ `Request unauthorized` |
+| No token | *(none)* | compute-provisioning / list | ❌ `Request unauthorized` |
 | Read across teams | `alice.jwt` | team-b / list | ✅ allowed |
-| Write own team | `alice.jwt` | team-a / start | ✅ allowed |
+| Write own team | `alice.jwt` | compute-provisioning / start | ✅ allowed |
 | Write another team | `alice.jwt` | team-b / start | ❌ `Request unauthorized` |
 | Admin | `admin.jwt` | any / any | ✅ allowed |
-| Worker poll | `worker-team-a.jwt` | team-a / poll | ✅ allowed |
+| Worker poll | `worker-compute-provisioning.jwt` | compute-provisioning / poll | ✅ allowed |
 
 ```bash
 cd auth/out/tokens; A=127.0.0.1:7233
-temporal workflow list  --address $A -n team-a                                            # -> unauthorized
+temporal workflow list  --address $A -n compute-provisioning                                            # -> unauthorized
 temporal workflow list  --address $A -n team-b --grpc-meta "authorization=Bearer $(cat alice.jwt)"  # -> ok
 temporal workflow start --address $A -n team-b --task-queue orders-tq --type OrderWorkflow \
   --workflow-id t --input '{"orderId":"X","amount":1}' \

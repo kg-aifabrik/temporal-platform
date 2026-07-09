@@ -91,7 +91,7 @@ Each team gets its own Temporal namespace (isolation of workflows, task queues,
 and — once RBAC is on — access). With the port-forward from Layer 2 running:
 
 ```bash
-temporal operator namespace create --address 127.0.0.1:7233 --retention 72h team-a
+temporal operator namespace create --address 127.0.0.1:7233 --retention 72h compute-provisioning
 temporal operator namespace create --address 127.0.0.1:7233 --retention 72h team-b
 temporal operator namespace list --address 127.0.0.1:7233 | grep Name
 ```
@@ -107,12 +107,12 @@ Kubernetes Deployments — see [`workers/Dockerfile`](../workers/Dockerfile) and
 
 ```bash
 cd workers
-go build -o bin/team-a ./team-a
+go build -o bin/compute-provisioning ./compute-provisioning
 go build -o bin/team-b ./team-b
 cd ..
 
 # Run each worker in its own terminal (or background them):
-TEMPORAL_ADDRESS=127.0.0.1:7233 TEMPORAL_NAMESPACE=team-a ./workers/bin/team-a
+TEMPORAL_ADDRESS=127.0.0.1:7233 TEMPORAL_NAMESPACE=compute-provisioning ./workers/bin/compute-provisioning
 TEMPORAL_ADDRESS=127.0.0.1:7233 TEMPORAL_NAMESPACE=team-b ./workers/bin/team-b
 ```
 
@@ -121,8 +121,8 @@ Each logs `Started Worker` on its task queue (`provisioning-tq`, `orders-tq`).
 Start a few workflow instances:
 
 ```bash
-# team-a — provisioning pipeline
-temporal workflow start --address 127.0.0.1:7233 -n team-a \
+# compute-provisioning — provisioning pipeline
+temporal workflow start --address 127.0.0.1:7233 -n compute-provisioning \
   --task-queue provisioning-tq --type ProvisionClusterWorkflow \
   --workflow-id prov-edge-01 --input '{"clusterName":"edge-01","nodeCount":3}'
 
@@ -135,13 +135,13 @@ temporal workflow start --address 127.0.0.1:7233 -n team-b \
 Confirm they complete:
 
 ```bash
-temporal workflow list --address 127.0.0.1:7233 -n team-a
+temporal workflow list --address 127.0.0.1:7233 -n compute-provisioning
 temporal workflow list --address 127.0.0.1:7233 -n team-b
 ```
 
 The provisioning workflow's `InstallOS` activity fails on its first attempt and
 succeeds on the second — a deliberate retry you can see in the event history
-(`temporal workflow show -n team-a --workflow-id prov-edge-01`).
+(`temporal workflow show -n compute-provisioning --workflow-id prov-edge-01`).
 
 ---
 
@@ -151,7 +151,7 @@ succeeds on the second — a deliberate retry you can see in the event history
 kubectl --context rancher-desktop -n temporal port-forward svc/temporal-web 8080:8080
 ```
 
-Open <http://localhost:8080>. Switch namespaces (top-left) between **team-a** and
+Open <http://localhost:8080>. Switch namespaces (top-left) between **compute-provisioning** and
 **team-b** to see each team's runs. Click a workflow to inspect its event history,
 inputs/outputs, and the `InstallOS` retry.
 
@@ -205,8 +205,8 @@ Workers now need a `team-x:write` token to poll. Stop the tokenless workers from
 Layer 4 and restart them with tokens:
 
 ```bash
-TEMPORAL_ADDRESS=127.0.0.1:7233 TEMPORAL_NAMESPACE=team-a \
-  TEMPORAL_AUTH_TOKEN=$(cat auth/out/tokens/worker-team-a.jwt) ./workers/bin/team-a
+TEMPORAL_ADDRESS=127.0.0.1:7233 TEMPORAL_NAMESPACE=compute-provisioning \
+  TEMPORAL_AUTH_TOKEN=$(cat auth/out/tokens/worker-compute-provisioning.jwt) ./workers/bin/compute-provisioning
 
 TEMPORAL_ADDRESS=127.0.0.1:7233 TEMPORAL_NAMESPACE=team-b \
   TEMPORAL_AUTH_TOKEN=$(cat auth/out/tokens/worker-team-b.jwt) ./workers/bin/team-b
@@ -214,22 +214,22 @@ TEMPORAL_ADDRESS=127.0.0.1:7233 TEMPORAL_NAMESPACE=team-b \
 
 ### 6e. Verify the policy
 
-Pass each user's token as gRPC metadata. `alice` is on team-a.
+Pass each user's token as gRPC metadata. `alice` is on compute-provisioning.
 
 ```bash
 cd auth/out/tokens
 A=127.0.0.1:7233
 
 # No token -> denied
-temporal workflow list --address $A -n team-a
+temporal workflow list --address $A -n compute-provisioning
 # Error: ... Request unauthorized.
 
 # alice READS team-b (read-all) -> allowed
 temporal workflow list --address $A -n team-b \
   --grpc-meta "authorization=Bearer $(cat alice.jwt)"
 
-# alice MODIFIES her own team-a -> allowed
-temporal workflow start --address $A -n team-a --task-queue provisioning-tq \
+# alice MODIFIES her own compute-provisioning -> allowed
+temporal workflow start --address $A -n compute-provisioning --task-queue provisioning-tq \
   --type ProvisionClusterWorkflow --workflow-id alice-owns \
   --input '{"clusterName":"alice-edge","nodeCount":1}' \
   --grpc-meta "authorization=Bearer $(cat alice.jwt)"
@@ -246,10 +246,10 @@ cd ../../..
 
 | Token | Member of | `permissions` claim | Can do |
 |---|---|---|---|
-| `alice`, `bob` | team-a | `temporal-system:read`, `team-a:write` | Read all; modify team-a |
+| `alice`, `bob` | compute-provisioning | `temporal-system:read`, `compute-provisioning:write` | Read all; modify compute-provisioning |
 | `carol`, `dave` | team-b | `temporal-system:read`, `team-b:write` | Read all; modify team-b |
 | `admin` | — | `temporal-system:admin` | Everything, incl. delete |
-| `worker-team-a` / `-b` | — | `team-a:write` / `team-b:write` | Poll + execute for that team |
+| `worker-compute-provisioning` / `-b` | — | `compute-provisioning:write` / `team-b:write` | Poll + execute for that team |
 
 **On the UI under RBAC:** the Web UI is pointed at the `internal-frontend`
 (which bypasses auth) so it keeps full visibility on a laptop without an OIDC

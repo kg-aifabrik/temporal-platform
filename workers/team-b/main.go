@@ -1,7 +1,7 @@
 // Team B worker: a small 5-step "order processing" toy workflow.
 //
 // It exists to show a second team, in its own namespace, with its own task
-// queue and workflow type — independent of Team A. Five sequential activities,
+// queue and workflow type — independent of the compute-provisioning team. Five sequential activities,
 // each a log line and a short sleep.
 //
 // Run:

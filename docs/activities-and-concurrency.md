@@ -2,7 +2,7 @@
 
 The next level after [`writing-workflows.md`](writing-workflows.md): how work
 flows through Temporal, and how to handle the concurrency and reliability
-situations a team hits in production. Examples use team-a's provisioning
+situations a team hits in production. Examples use compute-provisioning's provisioning
 workflow.
 
 ## The working model we assume
@@ -256,6 +256,6 @@ on the errors retrying can't fix.
 an earlier point and replay forward with the new code, instead of starting over:
 
 ```bash
-temporal workflow reset -n team-a --workflow-id provision-SN-4C2K3D9 \
+temporal workflow reset -n compute-provisioning --workflow-id provision-SN-4C2K3D9 \
   --type LastWorkflowTask --reason "fixed InstallOS bug"
 ```

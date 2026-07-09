@@ -3,8 +3,8 @@
 This document is an overview for a team building, testing, and deploying their
 own workflows on the shared Temporal infrastructure. For the rest of the
 document we use **team-c** as a team that is coming on board. You can use
-**team-a** — the bare-metal → OS → Kubernetes provisioning pipeline in
-[`workers/team-a`](../workers/team-a) — as a reference during your journey.
+**compute-provisioning** — the bare-metal → OS → Kubernetes provisioning pipeline in
+[`workers/compute-provisioning`](../workers/compute-provisioning) — as a reference during your journey.
 
 Here's the split in responsibility. Your team writes the workflows, activities,
 and tests, and commits them. The platform team owns everything else: the cluster,
@@ -22,7 +22,7 @@ just detail.
   durable, so if the process running it crashes, Temporal replays the workflow's
   history and picks up where it left off. That replay is why workflow code must
   be deterministic: no reading the clock, no random numbers, no network calls
-  directly inside it. *Example: team-a's workflow says "allocate the hardware,
+  directly inside it. *Example: compute-provisioning's workflow says "allocate the hardware,
   install the OS, build Kubernetes, then verify." It's the recipe, not the
   cooking.*
 - **Activity** — a plain function that does the real work: call an API, write a
@@ -158,7 +158,7 @@ anything else.
 
 ### Step 1 — a package for your team
 
-team-a and team-b live as `package main` under the one `workers` Go module. Add
+compute-provisioning and team-b live as `package main` under the one `workers` Go module. Add
 yours the same way — no new module:
 
 ```bash
@@ -234,9 +234,9 @@ your machine. You never run it this way against the shared environments; the
 platform pipeline does that (see *How your code ships to shared environments*).
 Everything else is making the workflow do more.
 
-## Growing into a real pipeline (team-a)
+## Growing into a real pipeline (compute-provisioning)
 
-[`workers/team-a/main.go`](../workers/team-a/main.go) is the same shape, grown up.
+[`workers/compute-provisioning/main.go`](../workers/compute-provisioning/main.go) is the same shape, grown up.
 Three things it adds that yours will too:
 
 **Several activities in sequence**, each result feeding the next:
@@ -260,7 +260,7 @@ ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 })
 ```
 
-team-a's `InstallOS` fails on its first attempt on purpose and succeeds on the
+compute-provisioning's `InstallOS` fails on its first attempt on purpose and succeeds on the
 second. Temporal retries it for you, and you see attempt 2 in the UI.
 
 **Durable timers** instead of `time.Sleep`. Inside a workflow, use
@@ -330,10 +330,10 @@ Run it:
 cd workers && go test ./team-c/ -v
 ```
 
-When the workflow has several activities and a retry, like team-a, you mock each
+When the workflow has several activities and a retry, like compute-provisioning, you mock each
 one the same way and assert the final result. Two worked examples ship in the
 repo — read them as templates:
-[`workers/team-a/workflow_test.go`](../workers/team-a/workflow_test.go) and
+[`workers/compute-provisioning/workflow_test.go`](../workers/compute-provisioning/workflow_test.go) and
 [`workers/team-b/workflow_test.go`](../workers/team-b/workflow_test.go). Name each
 test by the behavior it proves.
 
@@ -403,7 +403,7 @@ What lands in the repo, and what must never:
 The gate before a pull request is green tests, then a branch and PR:
 
 ```bash
-cd workers && go test ./...     # your team-c test passes alongside team-a/team-b
+cd workers && go test ./...     # your team-c test passes alongside compute-provisioning/team-b
 cd ..
 git checkout -b team-c-onboarding
 git add workers/team-c auth/tokengen/main.go
@@ -442,7 +442,7 @@ shape is described above.
 
 Work from the outside in. The UI shows what happened, the CLI gets you the
 details, and the shape of the failure tells you where to look. The examples use
-team-a because it has runs to inspect; for team-c, swap in `-n team-c` and a
+compute-provisioning because it has runs to inspect; for team-c, swap in `-n team-c` and a
 team-c member token (for example `erin.jwt`).
 
 ### Start in the Web UI
@@ -461,9 +461,9 @@ read:
 ### Then the CLI
 
 ```bash
-temporal workflow describe -n team-a --workflow-id prov-edge-01   # status, pending activities, task queue
-temporal workflow show     -n team-a --workflow-id prov-edge-01   # full event history
-temporal workflow list     -n team-a --query 'ExecutionStatus="Failed"'   # find the broken ones
+temporal workflow describe -n compute-provisioning --workflow-id prov-edge-01   # status, pending activities, task queue
+temporal workflow show     -n compute-provisioning --workflow-id prov-edge-01   # full event history
+temporal workflow list     -n compute-provisioning --query 'ExecutionStatus="Failed"'   # find the broken ones
 ```
 
 Add `--grpc-meta "authorization=Bearer $(cat auth/out/tokens/alice.jwt)"` when
@@ -486,7 +486,7 @@ Once you've fixed a bug, you don't start over. Reset rewinds a workflow to an
 earlier point in its history and replays forward with the new code:
 
 ```bash
-temporal workflow reset -n team-a --workflow-id prov-edge-01 \
+temporal workflow reset -n compute-provisioning --workflow-id prov-edge-01 \
   --type LastWorkflowTask --reason "fixed InstallOS bug"
 ```
 
