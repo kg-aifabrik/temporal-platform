@@ -1,0 +1,62 @@
+# One-off schema setup for Cloud SQL, run as the Temporal Workload Identity.
+#
+# The Helm chart's built-in schema hook can't carry the Cloud SQL Auth Proxy, so
+# schema creation runs here instead: temporal-sql-tool (from the admin-tools
+# image) talks to a proxy native sidecar on 127.0.0.1:5432. The proxy
+# authenticates to Cloud SQL as the pod's Workload Identity (--auto-iam-authn),
+# so the tool connects as the IAM user with no password.
+#
+# The two databases already exist (the iac-gke cloud-sql module created them), so
+# this only sets up and versions the schema inside them.
+#
+# Placeholders substituted at deploy time (see docs/runbook-gke-cloud-sql.md):
+#   __TEMPORAL_DB_IAM_USER__       temporal-sql@<project>.iam
+#   __CLOUD_SQL_CONNECTION_NAME__  <project>:<region>:<instance>
+#
+# The admin-tools tag must match the server version (1.31.1); confirm against the
+# chart's admintools.image.tag before running.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: temporal-schema
+  namespace: temporal
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: temporal   # Workload-Identity-bound to the Cloud SQL GSA
+      initContainers:
+        - name: cloud-sql-proxy
+          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.1
+          restartPolicy: Always      # native sidecar: torn down when the main container exits
+          args:
+            - "--private-ip"
+            - "--auto-iam-authn"
+            - "--address=127.0.0.1"
+            - "--port=5432"
+            - "__CLOUD_SQL_CONNECTION_NAME__"
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+      containers:
+        - name: schema
+          image: temporalio/admin-tools:1.31.1
+          env:
+            - { name: SQL_PLUGIN, value: postgres12 }
+            - { name: SQL_HOST, value: "127.0.0.1" }
+            - { name: SQL_PORT, value: "5432" }
+            - { name: SQL_USER, value: "__TEMPORAL_DB_IAM_USER__" }
+            # No SQL_PASSWORD: the proxy injects the IAM token as the credential.
+          command: ["/bin/bash", "-ec"]
+          args:
+            - |
+              base=/etc/temporal/schema/postgresql/v12
+              sql() { temporal-sql-tool --plugin "$SQL_PLUGIN" --ep "$SQL_HOST" -p "$SQL_PORT" -u "$SQL_USER" "$@"; }
+              # default store
+              sql --db temporal setup-schema -v 0.0
+              sql --db temporal update-schema -d "$base/temporal/versioned"
+              # visibility store
+              sql --db temporal_visibility setup-schema -v 0.0
+              sql --db temporal_visibility update-schema -d "$base/visibility/versioned"
+              echo "schema setup complete"

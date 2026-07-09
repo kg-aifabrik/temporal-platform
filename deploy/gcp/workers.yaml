@@ -1,0 +1,97 @@
+# Team workers on GKE. Each connects to the Temporal frontend over gRPC and
+# exposes SDK metrics on :9090 for Prometheus (ServiceMonitor below).
+#
+# Workers need NO Cloud SQL access — only the Temporal server touches the
+# database. So there is no proxy sidecar and no Workload Identity here; the
+# default service account is enough.
+#
+# Images come from Artifact Registry, pushed by hand or CI. Substitute the repo
+# at deploy time (see docs/runbook-gke-cloud-sql.md):
+#   __AR_REPO__   us-central1-docker.pkg.dev/<project>/app
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-compute-provisioning
+  namespace: temporal
+  labels: { app: worker-compute-provisioning, temporal-worker: "true" }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: worker-compute-provisioning } }
+  template:
+    metadata:
+      labels: { app: worker-compute-provisioning, temporal-worker: "true" }
+    spec:
+      containers:
+        - name: worker
+          image: __AR_REPO__/temporal-worker-compute-provisioning:dev
+          ports:
+            - { name: metrics, containerPort: 9090 }
+          env:
+            - { name: TEMPORAL_ADDRESS, value: "temporal-frontend.temporal.svc:7233" }
+            - { name: TEMPORAL_NAMESPACE, value: "compute-provisioning" }
+            - { name: TEMPORAL_METRICS_ADDR, value: ":9090" }
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { memory: 128Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: worker-compute-provisioning
+  namespace: temporal
+  labels: { temporal-worker: "true" }
+spec:
+  selector: { app: worker-compute-provisioning }
+  ports:
+    - { name: metrics, port: 9090, targetPort: metrics }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-team-b
+  namespace: temporal
+  labels: { app: worker-team-b, temporal-worker: "true" }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: worker-team-b } }
+  template:
+    metadata:
+      labels: { app: worker-team-b, temporal-worker: "true" }
+    spec:
+      containers:
+        - name: worker
+          image: __AR_REPO__/temporal-worker-team-b:dev
+          ports:
+            - { name: metrics, containerPort: 9090 }
+          env:
+            - { name: TEMPORAL_ADDRESS, value: "temporal-frontend.temporal.svc:7233" }
+            - { name: TEMPORAL_NAMESPACE, value: "team-b" }
+            - { name: TEMPORAL_METRICS_ADDR, value: ":9090" }
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { memory: 128Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: worker-team-b
+  namespace: temporal
+  labels: { temporal-worker: "true" }
+spec:
+  selector: { app: worker-team-b }
+  ports:
+    - { name: metrics, port: 9090, targetPort: metrics }
+---
+# One ServiceMonitor covering both teams' worker metrics services.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: temporal-workers
+  namespace: temporal
+  labels: { release: monitoring }
+spec:
+  selector:
+    matchLabels: { temporal-worker: "true" }
+  endpoints:
+    - { port: metrics, path: /metrics, interval: 15s }
