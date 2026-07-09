@@ -1,305 +1,260 @@
-# Concurrency, long-running activities, and idempotency
+# The execution model, and common concurrency scenarios
 
-The next level after [`writing-workflows.md`](writing-workflows.md): how to throttle
-how much team-c runs at once, how to write an activity that takes hours, and how
-to make activities safe to retry. Examples continue with team-c and team-a.
+The next level after [`writing-workflows.md`](writing-workflows.md): how work
+actually flows through Temporal, and how to handle the concurrency and
+reliability situations a team hits in production. Examples use team-a's
+provisioning workflow.
 
-## Throttling concurrency
+## The working model we assume
 
-First, a clarification, because it trips people up. A running workflow is cheap:
-it mostly sits idle waiting on activities and timers, and it isn't "resident" in
-a worker. So "throttle the concurrency of workflows" almost always means one of
-two concrete things: **how many activities/workflow tasks execute at once**, and
-**how fast work is dispatched**. Those are the knobs below.
+For the rest of this document, assume the model the platform has settled on:
+**provisioning is driven by an API, one host per call.**
 
-The controls live at three levels.
+- A caller hits the provisioning API once per machine. The API starts one
+  Temporal workflow for that host and returns immediately.
+- For 1000 machines, the API is called 1000 times — 1000 independent workflows.
+- We do **not** know the total volume or the arrival rate in advance; requests
+  can arrive in bursts.
 
-### 1. Worker options (per team)
+Every scenario below builds on that. It matters because the throttling and
+reliability tools you reach for depend on whether work is one big batch or, as
+here, a stream of independent single-host workflows.
 
-These are set on the worker your team ships, so in practice they are your team's
-knobs. Defaults are large on purpose (Temporal assumes you want throughput):
+## The mental model
 
-| `worker.Options` field | Controls | Default |
-|---|---|---|
-| `MaxConcurrentActivityExecutionSize` | Activities running at once **in one worker pod** | 1000 |
-| `MaxConcurrentWorkflowTaskExecutionSize` | Workflow tasks processed at once in one pod | 1000 |
-| `MaxConcurrentLocalActivityExecutionSize` | Local activities at once in one pod | 1000 |
-| `MaxConcurrentActivityTaskPollers` / `...WorkflowTaskPollers` | Poller goroutines per pod | 2 |
-| `WorkerActivitiesPerSecond` | Activity start rate **per pod** | 100000 (∞) |
-| `TaskQueueActivitiesPerSecond` | Activity start rate across the **whole task queue** (all pods) | 100000 (∞) |
+Understanding how a request becomes running work is the foundation for
+everything else. This is the picture worth holding in your head:
 
-```go
-w := worker.New(c, "team-c-tq", worker.Options{
-    MaxConcurrentActivityExecutionSize: 50,   // at most 50 activities per pod
-    TaskQueueActivitiesPerSecond:       20,    // at most 20 activity starts/sec across all team-c pods
-})
-```
+![How a provisioning request flows through Temporal](diagrams/provisioning-flow.png)
 
-The distinction that matters: `MaxConcurrentActivityExecutionSize` is **per pod**,
-so team-c's real limit is that times the replica count (which the platform
-scales). To cap team-c *as a whole* regardless of how many pods run, use
-`TaskQueueActivitiesPerSecond` — it's enforced across the entire task queue.
+Walking the flow:
 
-### 2. Per-workflow throttling
+1. The **API facade** takes a provision request and calls the Temporal
+   **Frontend** — `StartWorkflow`, with the host ID as the workflow ID.
+2. The Frontend **persists** the workflow's first event to the database and
+   returns. The request is now durable; it will run even if everything
+   downstream is busy.
+3. The server puts a **Workflow Task** on a **task queue**. A **Workflow Worker**
+   polls the queue, runs your workflow code, and — as the code executes — emits
+   **commands** ("schedule the InstallOS activity").
+4. Each scheduled activity becomes an **Activity Task** on a task queue. An
+   **Install Worker** polls it, runs the real work (calling the image servers),
+   and reports the result back.
+5. The result is persisted, the server schedules the next Workflow Task, the
+   worker resumes your code, and the loop repeats until the workflow completes.
 
-Temporal has **no built-in "run at most N workflows of type X"** switch. When you
-need it, pick one:
+Two corrections to the intuition most people start with:
 
-- **Bound fan-out inside a workflow** with a semaphore. This caps concurrent
-  activities (or child workflows) started by a single workflow execution — e.g.
-  install the OS on at most 3 nodes at a time:
+- **A workflow is not pre-sliced into activities.** Your workflow code *runs* on
+  a worker, and it schedules each activity when the code reaches it. The server
+  and database don't run your code — they persist state and hand out tasks.
+- **The task queue is a durable buffer, not a fire-hose.** Tasks wait there until
+  a worker has capacity. That buffering is exactly what lets you throttle work
+  without losing it (Scenario 1), and what makes a workflow's state survive a
+  crash (Scenario 2).
 
-  ```go
-  sem := workflow.NewSemaphore(ctx, 3)
-  for _, node := range nodes {
-      node := node
-      _ = sem.Acquire(ctx, 1)
-      workflow.Go(ctx, func(ctx workflow.Context) {
-          defer sem.Release(1)
-          _ = workflow.ExecuteActivity(ctx, InstallOS, node).Get(ctx, nil)
-      })
-  }
-  ```
+Three facts fall out of this model and drive the scenarios below:
 
-  **Scope: one workflow execution.** This limit is not per-pod or cluster-wide.
-  If ten provisioning workflows run at once, each gets its own limit of 3 — so up
-  to 30 `InstallOS` activities run across the fleet. To turn it into a real global
-  cap, either run the whole batch as a *single* workflow (one execution then
-  equals the whole job — see *Worked example* below) or enforce the limit with a
-  shared task-queue ceiling.
+- Starting a workflow is cheap and durable — you can accept a huge burst.
+- Work only runs when a worker pulls it, so **worker capacity is your throttle**.
+- Every step is written to history, so **state is durable for free** and failed
+  steps can simply be retried.
 
-- **Give the workflow type its own task queue** and a worker sized for it, then
-  cap that queue with `TaskQueueActivitiesPerSecond`. A task queue is just a
-  name, so this is cheap.
-- **Throttle at the start** — rate-limit how fast you call `StartWorkflow`, or
-  route starts through a single "gatekeeper" workflow that only lets N children
-  run at once.
+---
 
-So: throttling is per **team** (worker options, task-queue rate) or per **task
-queue**; a per-workflow-type cap is something you build with one of the patterns
-above.
+## Scenario 1 — a burst of requests
 
-### 3. The platform's ceiling (per namespace)
+*"A flood of provision calls just arrived. How do I keep from exhausting the
+Temporal cluster and the image servers (network bandwidth for OS images)?"*
 
-Above your knobs, the platform team caps each namespace server-side (requests per
-second and database queries per second per namespace) so no single team can
-overwhelm the shared cluster. That cap is per team (per namespace) and is set by
-the platform, not you — your worker settings tune throughput *up to* that ceiling.
-See the research repo's `multi-tenancy-setup.md`.
+The instinct is to rate-limit the API. Don't. Starting a workflow is cheap and
+durable, so **accept every request** and throttle the step that actually stresses
+your resources — the install.
 
-## Worked example: 1000 machines, 100 installs at a time
-
-Goal: provision 1000 machines, but never more than 100 installs running at once,
-so the image servers and the cluster aren't overwhelmed. Use two layers — one for
-the *intended* limit, one as a *guardrail* that holds no matter what the workflow
-code does.
-
-**Layer 1 — the intended limit: one batch workflow with a semaphore.** Because a
-semaphore is scoped to a single execution, run the whole batch as *one* workflow.
-Its per-execution limit of 100 is then the global limit for the job:
+**Accept and dedupe at the API.** Each call starts one per-host workflow and
+returns. Use the host ID as the workflow ID so retries don't double-provision:
 
 ```go
-func ProvisionFleetWorkflow(ctx workflow.Context, machines []string) error {
-    sem := workflow.NewSemaphore(ctx, 100)   // at most 100 in flight for this job
-    wg := workflow.NewWaitGroup(ctx)
-    for _, m := range machines {
-        m := m
-        _ = sem.Acquire(ctx, 1)              // blocks the loop once 100 are running
-        wg.Add(1)
-        workflow.Go(ctx, func(ctx workflow.Context) {
-            defer wg.Done()
-            defer sem.Release(1)
-            // one child workflow per machine (allocate -> OS -> k8s)
-            _ = workflow.ExecuteChildWorkflow(ctx, ProvisionMachineWorkflow, m).Get(ctx, nil)
-        })
-    }
-    wg.Wait(ctx)
-    return nil
-}
-```
-
-`Acquire` blocks the loop once 100 are in flight, so machine 101 waits for one to
-finish. One execution means the 100 cap is global for this batch.
-
-**Layer 2 — the guardrail: a dedicated task queue with a hard ceiling.** The
-semaphore is workflow *logic*; a bug, or a second batch started by someone else,
-could still push past 100. Protect the shared resources regardless by running the
-install activity on its own task queue with a worker fleet whose total capacity is
-the ceiling:
-
-- `MaxConcurrentActivityExecutionSize` so the install worker pods can't run more
-  than the cap between them (e.g. one pod at 100, or a fixed per-pod × replica
-  budget). The worker simply stops pulling work at the limit.
-- `TaskQueueActivitiesPerSecond` as well if the image servers care about request
-  *rate*, not just concurrency.
-
-With the install activities isolated on their own queue and worker, even two
-batches running at once can't drive the image servers past the ceiling.
-
-**If several independent jobs must share one global budget** — not one batch, but
-many separate workflows across pods sharing a pool of 100 — the in-workflow
-semaphore isn't enough, because each job gets its own 100. Two options: rely on
-the Layer-2 task-queue ceiling (the worker fleet *is* the shared limit, which is
-usually the simplest answer), or run a **gatekeeper workflow** — one long-lived
-workflow holding 100 leases that the others signal to acquire and release before
-and after installing. The API-driven case below is exactly this situation.
-
-**Keep history bounded.** One workflow driving 1000 children writes a few thousand
-history events, which is fine. Far beyond that (tens of thousands of events),
-process the machines in chunks and `workflow.NewContinueAsNewError` between chunks
-so the workflow's history stays small.
-
-## When work arrives through an API (one host per call)
-
-Often there's no batch at all: an API is called once per host — 1000 times for
-1000 machines — and you don't know the total or the arrival rate in advance. There
-is no parent workflow to hold a semaphore, so the cap has to live outside any
-single execution. Three things make this clean.
-
-**1. The API just starts a workflow, and dedupes on host ID.** Each call starts
-one per-host workflow and returns immediately (e.g. HTTP 202 with the workflow ID
-as the handle). Use the host ID as the workflow ID so a retried or duplicate call
-doesn't provision twice:
-
-```go
-_, err := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
     ID:                       "provision-" + hostID,   // one workflow per host
     TaskQueue:                "provisioning-tq",
     WorkflowIDConflictPolicy: enums.WORKFLOW_ID_CONFLICT_POLICY_USE_EXISTING, // idempotent
 }, ProvisionMachineWorkflow, hostID)
 ```
 
-`USE_EXISTING` makes a second call for a host already being provisioned attach to
-the running workflow instead of erroring, so the API is naturally retry-safe.
-Starting a workflow is cheap and durable — once accepted it will run even if
-everything downstream is saturated, so the API never has to reject or block.
+`USE_EXISTING` makes a duplicate call for an in-flight host attach to the running
+workflow instead of erroring — so the API is retry-safe and never has to reject.
 
-**2. Throttle the scarce step, not the API.** Don't try to cap how many workflows
-start; cap the step that actually stresses the image servers. Run `InstallOS` on a
-dedicated install task queue whose worker fleet has a total capacity of 100
-(`MaxConcurrentActivityExecutionSize` × replicas). However many workflows are open,
-only 100 installs run at once — that's the fleet's capacity — and the rest sit in
-the task-queue backlog, starting as slots free up. That backlog **is** your
-backpressure: nothing is dropped, and the cap holds no matter how fast requests
-arrive. Add `TaskQueueActivitiesPerSecond` too if the image servers care about
-request rate.
+**Throttle the install, not the API.** Run `InstallOS` on a dedicated install
+task queue whose worker fleet has a fixed total capacity — say 100. However many
+workflows are open, only 100 installs run at once; the rest wait in the task
+queue backlog and start as slots free. That backlog *is* your backpressure —
+nothing is dropped. The knobs, all on the install worker:
 
-**3. Don't set a tight `ScheduleToStartTimeout` on the throttled activity.** Waiting
-in the backlog is the expected, healthy state here, so that timeout would just fail
-installs that are correctly queued (the SDK advises against setting it at all
-outside host-specific routing). Instead, watch the queue's **backlog** and
-**schedule-to-start latency**; a sustained rise is your signal to add install
-workers (raise the cap).
+| `worker.Options` field | Controls | Default |
+|---|---|---|
+| `MaxConcurrentActivityExecutionSize` | Activities running at once **per pod** | 1000 |
+| `MaxConcurrentActivityTaskPollers` | Poller goroutines per pod | 2 |
+| `WorkerActivitiesPerSecond` | Activity start rate **per pod** | 100000 (∞) |
+| `TaskQueueActivitiesPerSecond` | Activity start rate across the **whole queue** (all pods) | 100000 (∞) |
 
-**When you need the cap independent of fleet size, or want fairness/priority**, use
-the gatekeeper (resource-pool) workflow from the previous section: one long-lived
-workflow holding 100 permits that each host workflow signals to acquire before
-installing and release after. It's an explicit global semaphore across executions,
-at the cost of a hot singleton you must continue-as-new periodically, plus lease
-timeouts so a crashed holder's permit is reclaimed. Reach for it only if the
-task-queue ceiling isn't enough.
+- **To cap concurrency** (protect the image servers from too many *parallel*
+  transfers): size the fleet so `MaxConcurrentActivityExecutionSize` × replicas =
+  100. The worker simply stops pulling at the limit.
+- **To cap rate** (protect network *bandwidth* — new transfers started per
+  second): set `TaskQueueActivitiesPerSecond`. This is the knob for "don't kick
+  off more than N image downloads a second," enforced across all pods.
+- **Do not set a tight `ScheduleToStartTimeout`** on the throttled activity.
+  Waiting in the backlog is the healthy state here; that timeout would fail
+  installs that are correctly queued. Instead watch the queue's **backlog depth**
+  and **schedule-to-start latency** — a sustained rise is the signal to add
+  install workers.
 
-Bottom line: **accept every request as a durable workflow, and let a
-capacity-limited task queue meter the installs.** Unknown volume becomes a queue
-depth you monitor, not a number you must know up front.
+**Why this protects Temporal too:** you're never scheduling 1000 activities at
+once, so persistence load and history growth stay bounded. The platform also caps
+each namespace server-side (per-namespace requests/sec and DB queries/sec), so a
+runaway team can't overwhelm the shared cluster — your knobs tune throughput up to
+that ceiling (see the research repo's `multi-tenancy-setup.md`).
 
-## Long-running activities (a 2-hour OS install)
-
-An activity that runs for hours is normal in Temporal. Three things make it work.
-
-**1. Set the timeout to cover the whole run.** `StartToCloseTimeout` bounds a
-single attempt, so it must be at least as long as the work (plus margin):
+**The single-batch shortcut.** If instead you *do* have one job that owns all
+1000 hosts (not the API model), run it as a single workflow and bound the fan-out
+with a semaphore — because a semaphore is scoped to one execution, its limit is
+then the global limit for that job:
 
 ```go
-ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-    StartToCloseTimeout: 3 * time.Hour,   // the install may take ~2h
-    HeartbeatTimeout:    2 * time.Minute, // but we expect a heartbeat every ≤2m
-    RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 3},
-})
-```
-
-**2. Heartbeat while it runs.** Without a heartbeat, if the worker pod running the
-install dies, Temporal can't tell for up to the full 3-hour `StartToCloseTimeout`.
-With a short `HeartbeatTimeout`, a missed heartbeat is detected in ~2 minutes and
-the activity is retried. Heartbeating is also how a cancellation reaches the
-activity.
-
-```go
-func InstallOS(ctx context.Context, node string) (string, error) {
-    for step := 0; step < totalSteps; step++ {
-        if err := ctx.Err(); err != nil { // cancelled? stop.
-            return "", err
-        }
-        doInstallStep(node, step)
-        activity.RecordHeartbeat(ctx, step) // "I'm alive, and I'm on step N"
-    }
-    return "installed", nil
+sem := workflow.NewSemaphore(ctx, 100)
+wg := workflow.NewWaitGroup(ctx)
+for _, m := range machines {
+    m := m
+    _ = sem.Acquire(ctx, 1)          // blocks once 100 are in flight
+    wg.Add(1)
+    workflow.Go(ctx, func(ctx workflow.Context) {
+        defer wg.Done(); defer sem.Release(1)
+        _ = workflow.ExecuteChildWorkflow(ctx, ProvisionMachineWorkflow, m).Get(ctx, nil)
+    })
 }
+wg.Wait(ctx)
 ```
 
-**3. If an external system does the work, complete asynchronously.** When the
-install is driven by something that calls back later (a provisioning system,
-a human approval), return `activity.ErrResultPending` and complete the activity
-out of band via the client with the activity's task token, instead of blocking a
-worker for two hours. Use this when the wait is truly external; otherwise the
-heartbeat loop above is simpler.
+Watch the scope: a semaphore caps **one workflow execution**. In the API model
+each host is its own execution, so ten in-flight workflows would each get their
+own 100 — no global cap. That's why the API model throttles at the worker/queue
+(above). If you need a hard global cap independent of fleet size, run a
+**gatekeeper workflow**: one long-lived workflow holding 100 permits that each
+host workflow signals to acquire before installing and release after (continue-as-new
+periodically; use lease timeouts so a crashed holder's permit is reclaimed).
 
-## Idempotency and resuming after a retry
+---
 
-Because Temporal retries activities, **the same activity can run more than once**.
-Its side effects must be safe to repeat — that's idempotency, and it's on you, not
-the framework.
+## Scenario 2 — persisting state during a workflow
 
-### The knobs
+*"My workflow builds up state as it runs, and an install takes two hours. If a
+worker dies, do I lose that progress?"*
 
-- **Retry policy** on `ActivityOptions.RetryPolicy`. Defaults if you set nothing:
-  `InitialInterval` 1s, `BackoffCoefficient` 2.0, `MaximumInterval` 100×initial,
-  `MaximumAttempts` 0 (unlimited). Set `MaximumAttempts` to bound retries, and
-  list `NonRetryableErrorTypes` for failures that should never retry (a bad
-  request won't get better by trying again).
-- **`activity.GetInfo(ctx).Attempt`** tells you which attempt you're on (1-based).
-- **A stable idempotency key.** Derive one from values that don't change across
-  retries — the workflow ID is stable — and pass it to downstream systems so they
-  dedupe. `key := workflow-id + "/" + node` reused on every attempt means the
-  external "create host" call is a no-op the second time.
-- **Non-retryable for permanent failures.** Return
-  `temporal.NewNonRetryableApplicationError(...)` so Temporal stops instead of
-  burning attempts.
+Mostly, Temporal persists state for you — with one thing you manage yourself
+inside long activities.
 
-### Persisting progress across retries
+**Workflow state is durable automatically.** The variables in your workflow
+function (which hosts are done, the allocation result, a running count) are
+reconstructed by replaying the event history. You write ordinary Go; every
+activity result and every step is already in history, so if the worker crashes,
+another worker replays and continues with the same state. You never write
+persistence code for workflow state, and you must not reach for a database inside
+the workflow — history *is* the database.
 
-An activity can record progress as it goes and read it back on the next attempt,
-so a retry resumes instead of starting over. The mechanism is **heartbeat
-details**: whatever you pass to `RecordHeartbeat` is handed back to the next
-attempt.
+**Activity progress needs a checkpoint, because a retry restarts the activity.**
+If the 2-hour install dies at 90%, its retry starts from zero unless you record
+progress. Use **heartbeat details**: whatever you pass to `RecordHeartbeat` is
+handed back to the next attempt.
 
 ```go
 func InstallOSAllNodes(ctx context.Context, nodes []string) error {
     start := 0
-    if activity.HasHeartbeatDetails(ctx) {         // a previous attempt got partway
+    if activity.HasHeartbeatDetails(ctx) {   // a previous attempt got partway
         var done int
         _ = activity.GetHeartbeatDetails(ctx, &done)
-        start = done                                // resume from where it failed
+        start = done                          // resume where it failed
     }
     for i := start; i < len(nodes); i++ {
-        installOne(nodes[i])                        // must itself be idempotent
-        activity.RecordHeartbeat(ctx, i+1)          // checkpoint: i+1 nodes done
+        installOne(nodes[i])                  // itself idempotent (Scenario 3)
+        activity.RecordHeartbeat(ctx, i+1)    // checkpoint: i+1 done
     }
     return nil
 }
 ```
 
-If attempt 1 dies after node 3, attempt 2 reads `3` and starts at node 4.
+**Two levels of checkpoint — pick the granularity:**
 
-### Two levels of checkpointing — pick the granularity
+- *Across activities (free):* split a long job into several activities. Each
+  completed activity is in history, so a workflow retry never re-runs a finished
+  one. Reach for this first.
+- *Within one activity:* heartbeat details, as above, when a single step is long
+  and you don't want to split it.
 
-- **Across activities (workflow history).** Split a long job into several
-  activities. Each completed activity is written to the workflow's history, so if
-  the *workflow* is retried or replayed it never re-runs a finished activity. This
-  is the default, cheapest checkpoint — reach for it first.
-- **Within one activity (heartbeat details).** Use the pattern above when a single
-  activity is long and you want to resume mid-flight without splitting it. More
-  control, but you own the resume logic.
+**Very long or high-volume workflows:** history isn't infinite (tens of thousands
+of events is the practical ceiling). A workflow that loops forever or fans out to
+huge numbers should call `workflow.NewContinueAsNewError` to start a fresh
+execution with a compact state, keeping history small.
 
-Rule of thumb: many small activities give you automatic checkpoints for free;
-one big activity with heartbeats is for when the work genuinely can't be split.
+---
+
+## Scenario 3 — retrying on failure
+
+*"Installs fail — a flaky network, an image server 503, a worker pod that gets
+killed, and sometimes a bug in my own code. What does Temporal retry, and what do
+I have to handle?"*
+
+Temporal retries a lot for you; your job is to make retries safe and to fail fast
+on the errors retrying can't fix.
+
+**What retries automatically:**
+
+- **Activity errors** (the flaky network, the 503) — Temporal re-runs the
+  activity per its retry policy. Defaults if you set nothing: `InitialInterval`
+  1s, `BackoffCoefficient` 2.0, `MaximumInterval` 100× initial,
+  `MaximumAttempts` 0 (unlimited). Set `MaximumAttempts` to bound it.
+- **Worker crashes** — if the pod running an activity dies, the activity task
+  goes back on the queue and another worker picks it up. For a long install, set
+  a short `HeartbeatTimeout` so this is detected in minutes, not after the full
+  `StartToCloseTimeout`:
+
+  ```go
+  ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+      StartToCloseTimeout: 3 * time.Hour,   // covers the ~2h install
+      HeartbeatTimeout:    2 * time.Minute, // dead worker detected in ~2m
+      RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 5},
+  })
+  ```
+
+- **Workflow-code (workflow task) failures** — a panic or a bug in workflow code
+  fails the *workflow task*, not the workflow. Temporal keeps retrying the task,
+  so the workflow *pauses* rather than dying. Fix and redeploy the worker and it
+  picks up where it left off. This is why a bad deploy wedges workflows instead of
+  losing them.
+
+**What you must handle:**
+
+- **Idempotency.** Because activities can run more than once, their side effects
+  must be safe to repeat. Derive a stable idempotency key from values that don't
+  change across retries (the workflow ID is stable) and pass it to downstream
+  systems so a repeated "create host" is a no-op. `activity.GetInfo(ctx).Attempt`
+  tells you which attempt you're on.
+- **Fail fast on errors retrying can't fix.** A malformed request or a
+  deterministic code bug won't get better on attempt five. Return a
+  non-retryable error (`temporal.NewNonRetryableApplicationError(...)`, or list
+  `NonRetryableErrorTypes` in the policy) so Temporal stops immediately instead of
+  burning attempts.
+- **Determinism, for workflow code.** A retry of workflow code is a *replay*, so
+  the code must be deterministic — no clocks, randomness, or network calls in the
+  workflow (those go in activities). A non-deterministic change to a running
+  workflow's code is the one failure that can wedge it; guard it with a replay
+  test and version incompatible changes (see
+  [`writing-workflows.md`](writing-workflows.md#writing-tests)).
+
+**Re-running after a fix: reset.** Once you've fixed a bug, rewind a workflow to
+an earlier point and replay forward with the new code, instead of starting over:
+
+```bash
+temporal workflow reset -n team-a --workflow-id provision-host-42 \
+  --type LastWorkflowTask --reason "fixed InstallOS bug"
+```
