@@ -10,6 +10,22 @@ of the box:
   metrics: end-to-end and activity latency, failures, schedule-to-start latency,
   worker task-slot usage.
 
+## What the dashboards look like
+
+Captured from the local setup below after running ~110 workflows across team-a and
+team-b.
+
+**Temporal Server Metrics** — actions, service/persistence availability, and
+workflow-task / activity throughput:
+
+![Temporal Server Metrics dashboard](images/grafana-server-dashboard.png)
+
+**Temporal Go SDK (OTel) Metrics** — request rates and latencies from the workers,
+including the long-poll (PollWorkflowTaskQueue / PollActivityTaskQueue) latencies
+and the per-workflow execution panels:
+
+![Temporal Go SDK dashboard](images/grafana-sdk-dashboard.png)
+
 ## Where the metrics come from
 
 | Metrics | Source | Scraped via |
