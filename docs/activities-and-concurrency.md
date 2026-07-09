@@ -142,12 +142,66 @@ semaphore isn't enough, because each job gets its own 100. Two options: rely on
 the Layer-2 task-queue ceiling (the worker fleet *is* the shared limit, which is
 usually the simplest answer), or run a **gatekeeper workflow** — one long-lived
 workflow holding 100 leases that the others signal to acquire and release before
-and after installing.
+and after installing. The API-driven case below is exactly this situation.
 
 **Keep history bounded.** One workflow driving 1000 children writes a few thousand
 history events, which is fine. Far beyond that (tens of thousands of events),
 process the machines in chunks and `workflow.NewContinueAsNewError` between chunks
 so the workflow's history stays small.
+
+## When work arrives through an API (one host per call)
+
+Often there's no batch at all: an API is called once per host — 1000 times for
+1000 machines — and you don't know the total or the arrival rate in advance. There
+is no parent workflow to hold a semaphore, so the cap has to live outside any
+single execution. Three things make this clean.
+
+**1. The API just starts a workflow, and dedupes on host ID.** Each call starts
+one per-host workflow and returns immediately (e.g. HTTP 202 with the workflow ID
+as the handle). Use the host ID as the workflow ID so a retried or duplicate call
+doesn't provision twice:
+
+```go
+_, err := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+    ID:                       "provision-" + hostID,   // one workflow per host
+    TaskQueue:                "provisioning-tq",
+    WorkflowIDConflictPolicy: enums.WORKFLOW_ID_CONFLICT_POLICY_USE_EXISTING, // idempotent
+}, ProvisionMachineWorkflow, hostID)
+```
+
+`USE_EXISTING` makes a second call for a host already being provisioned attach to
+the running workflow instead of erroring, so the API is naturally retry-safe.
+Starting a workflow is cheap and durable — once accepted it will run even if
+everything downstream is saturated, so the API never has to reject or block.
+
+**2. Throttle the scarce step, not the API.** Don't try to cap how many workflows
+start; cap the step that actually stresses the image servers. Run `InstallOS` on a
+dedicated install task queue whose worker fleet has a total capacity of 100
+(`MaxConcurrentActivityExecutionSize` × replicas). However many workflows are open,
+only 100 installs run at once — that's the fleet's capacity — and the rest sit in
+the task-queue backlog, starting as slots free up. That backlog **is** your
+backpressure: nothing is dropped, and the cap holds no matter how fast requests
+arrive. Add `TaskQueueActivitiesPerSecond` too if the image servers care about
+request rate.
+
+**3. Don't set a tight `ScheduleToStartTimeout` on the throttled activity.** Waiting
+in the backlog is the expected, healthy state here, so that timeout would just fail
+installs that are correctly queued (the SDK advises against setting it at all
+outside host-specific routing). Instead, watch the queue's **backlog** and
+**schedule-to-start latency**; a sustained rise is your signal to add install
+workers (raise the cap).
+
+**When you need the cap independent of fleet size, or want fairness/priority**, use
+the gatekeeper (resource-pool) workflow from the previous section: one long-lived
+workflow holding 100 permits that each host workflow signals to acquire before
+installing and release after. It's an explicit global semaphore across executions,
+at the cost of a hot singleton you must continue-as-new periodically, plus lease
+timeouts so a crashed holder's permit is reclaimed. Reach for it only if the
+task-queue ceiling isn't enough.
+
+Bottom line: **accept every request as a durable workflow, and let a
+capacity-limited task queue meter the installs.** Unknown volume becomes a queue
+depth you monitor, not a number you must know up front.
 
 ## Long-running activities (a 2-hour OS install)
 
