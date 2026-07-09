@@ -51,6 +51,7 @@ workers/
 docs/
   runbook.md                  # platform operators: stand up the cluster locally
   writing-workflows.md        # team developers: write, run, test, debug a workflow
+  activities-and-concurrency.md  # concurrency throttling, long-running + idempotent activities
   test-plan.md                # what this repo tests, at which level, and how to run it
 ```
 
@@ -61,6 +62,10 @@ docs/
 - [`docs/writing-workflows.md`](docs/writing-workflows.md) — **team developers**:
   onboard a new team (team-c), then write, run, test, commit, and debug workflows;
   team-a is the mature reference example.
+- [`docs/activities-and-concurrency.md`](docs/activities-and-concurrency.md) —
+  **team developers, next level**: throttling workflow/task concurrency,
+  long-running activities (heartbeats, async completion), and idempotent,
+  resumable activities.
 - [`docs/test-plan.md`](docs/test-plan.md) — **what this repo tests**: unit,
   determinism/replay, end-to-end, RBAC, and smoke checks, at which level and how
   to run each.

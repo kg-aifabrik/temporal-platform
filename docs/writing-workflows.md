@@ -275,6 +275,10 @@ smaller ones), signals (send data into a running workflow), queries (read its
 state), continue-as-new (restart a long-runner with a fresh history), and
 Schedules (a cron replacement).
 
+For the next level — throttling how much your team runs at once, writing
+activities that take hours, and making activities safe to retry and resumable —
+see [`activities-and-concurrency.md`](activities-and-concurrency.md).
+
 ## Writing tests
 
 Tests are a bigger deal in Temporal than in most systems. Because a workflow

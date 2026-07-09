@@ -1,0 +1,182 @@
+# Concurrency, long-running activities, and idempotency
+
+The next level after [`writing-workflows.md`](writing-workflows.md): how to throttle
+how much team-c runs at once, how to write an activity that takes hours, and how
+to make activities safe to retry. Examples continue with team-c and team-a.
+
+## Throttling concurrency
+
+First, a clarification, because it trips people up. A running workflow is cheap:
+it mostly sits idle waiting on activities and timers, and it isn't "resident" in
+a worker. So "throttle the concurrency of workflows" almost always means one of
+two concrete things: **how many activities/workflow tasks execute at once**, and
+**how fast work is dispatched**. Those are the knobs below.
+
+The controls live at three levels.
+
+### 1. Worker options (per team)
+
+These are set on the worker your team ships, so in practice they are your team's
+knobs. Defaults are large on purpose (Temporal assumes you want throughput):
+
+| `worker.Options` field | Controls | Default |
+|---|---|---|
+| `MaxConcurrentActivityExecutionSize` | Activities running at once **in one worker pod** | 1000 |
+| `MaxConcurrentWorkflowTaskExecutionSize` | Workflow tasks processed at once in one pod | 1000 |
+| `MaxConcurrentLocalActivityExecutionSize` | Local activities at once in one pod | 1000 |
+| `MaxConcurrentActivityTaskPollers` / `...WorkflowTaskPollers` | Poller goroutines per pod | 2 |
+| `WorkerActivitiesPerSecond` | Activity start rate **per pod** | 100000 (∞) |
+| `TaskQueueActivitiesPerSecond` | Activity start rate across the **whole task queue** (all pods) | 100000 (∞) |
+
+```go
+w := worker.New(c, "team-c-tq", worker.Options{
+    MaxConcurrentActivityExecutionSize: 50,   // at most 50 activities per pod
+    TaskQueueActivitiesPerSecond:       20,    // at most 20 activity starts/sec across all team-c pods
+})
+```
+
+The distinction that matters: `MaxConcurrentActivityExecutionSize` is **per pod**,
+so team-c's real limit is that times the replica count (which the platform
+scales). To cap team-c *as a whole* regardless of how many pods run, use
+`TaskQueueActivitiesPerSecond` — it's enforced across the entire task queue.
+
+### 2. Per-workflow throttling
+
+Temporal has **no built-in "run at most N workflows of type X"** switch. When you
+need it, pick one:
+
+- **Bound fan-out inside a workflow** with a semaphore. This caps concurrent
+  activities (or child workflows) started by a single workflow execution — e.g.
+  install the OS on at most 3 nodes at a time:
+
+  ```go
+  sem := workflow.NewSemaphore(ctx, 3)
+  for _, node := range nodes {
+      node := node
+      _ = sem.Acquire(ctx, 1)
+      workflow.Go(ctx, func(ctx workflow.Context) {
+          defer sem.Release(1)
+          _ = workflow.ExecuteActivity(ctx, InstallOS, node).Get(ctx, nil)
+      })
+  }
+  ```
+
+- **Give the workflow type its own task queue** and a worker sized for it, then
+  cap that queue with `TaskQueueActivitiesPerSecond`. A task queue is just a
+  name, so this is cheap.
+- **Throttle at the start** — rate-limit how fast you call `StartWorkflow`, or
+  route starts through a single "gatekeeper" workflow that only lets N children
+  run at once.
+
+So: throttling is per **team** (worker options, task-queue rate) or per **task
+queue**; a per-workflow-type cap is something you build with one of the patterns
+above.
+
+### 3. The platform's ceiling (per namespace)
+
+Above your knobs, the platform team caps each namespace server-side (requests per
+second and database queries per second per namespace) so no single team can
+overwhelm the shared cluster. That cap is per team (per namespace) and is set by
+the platform, not you — your worker settings tune throughput *up to* that ceiling.
+See the research repo's `multi-tenancy-setup.md`.
+
+## Long-running activities (a 2-hour OS install)
+
+An activity that runs for hours is normal in Temporal. Three things make it work.
+
+**1. Set the timeout to cover the whole run.** `StartToCloseTimeout` bounds a
+single attempt, so it must be at least as long as the work (plus margin):
+
+```go
+ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+    StartToCloseTimeout: 3 * time.Hour,   // the install may take ~2h
+    HeartbeatTimeout:    2 * time.Minute, // but we expect a heartbeat every ≤2m
+    RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 3},
+})
+```
+
+**2. Heartbeat while it runs.** Without a heartbeat, if the worker pod running the
+install dies, Temporal can't tell for up to the full 3-hour `StartToCloseTimeout`.
+With a short `HeartbeatTimeout`, a missed heartbeat is detected in ~2 minutes and
+the activity is retried. Heartbeating is also how a cancellation reaches the
+activity.
+
+```go
+func InstallOS(ctx context.Context, node string) (string, error) {
+    for step := 0; step < totalSteps; step++ {
+        if err := ctx.Err(); err != nil { // cancelled? stop.
+            return "", err
+        }
+        doInstallStep(node, step)
+        activity.RecordHeartbeat(ctx, step) // "I'm alive, and I'm on step N"
+    }
+    return "installed", nil
+}
+```
+
+**3. If an external system does the work, complete asynchronously.** When the
+install is driven by something that calls back later (a provisioning system,
+a human approval), return `activity.ErrResultPending` and complete the activity
+out of band via the client with the activity's task token, instead of blocking a
+worker for two hours. Use this when the wait is truly external; otherwise the
+heartbeat loop above is simpler.
+
+## Idempotency and resuming after a retry
+
+Because Temporal retries activities, **the same activity can run more than once**.
+Its side effects must be safe to repeat — that's idempotency, and it's on you, not
+the framework.
+
+### The knobs
+
+- **Retry policy** on `ActivityOptions.RetryPolicy`. Defaults if you set nothing:
+  `InitialInterval` 1s, `BackoffCoefficient` 2.0, `MaximumInterval` 100×initial,
+  `MaximumAttempts` 0 (unlimited). Set `MaximumAttempts` to bound retries, and
+  list `NonRetryableErrorTypes` for failures that should never retry (a bad
+  request won't get better by trying again).
+- **`activity.GetInfo(ctx).Attempt`** tells you which attempt you're on (1-based).
+- **A stable idempotency key.** Derive one from values that don't change across
+  retries — the workflow ID is stable — and pass it to downstream systems so they
+  dedupe. `key := workflow-id + "/" + node` reused on every attempt means the
+  external "create host" call is a no-op the second time.
+- **Non-retryable for permanent failures.** Return
+  `temporal.NewNonRetryableApplicationError(...)` so Temporal stops instead of
+  burning attempts.
+
+### Persisting progress across retries
+
+An activity can record progress as it goes and read it back on the next attempt,
+so a retry resumes instead of starting over. The mechanism is **heartbeat
+details**: whatever you pass to `RecordHeartbeat` is handed back to the next
+attempt.
+
+```go
+func InstallOSAllNodes(ctx context.Context, nodes []string) error {
+    start := 0
+    if activity.HasHeartbeatDetails(ctx) {         // a previous attempt got partway
+        var done int
+        _ = activity.GetHeartbeatDetails(ctx, &done)
+        start = done                                // resume from where it failed
+    }
+    for i := start; i < len(nodes); i++ {
+        installOne(nodes[i])                        // must itself be idempotent
+        activity.RecordHeartbeat(ctx, i+1)          // checkpoint: i+1 nodes done
+    }
+    return nil
+}
+```
+
+If attempt 1 dies after node 3, attempt 2 reads `3` and starts at node 4.
+
+### Two levels of checkpointing — pick the granularity
+
+- **Across activities (workflow history).** Split a long job into several
+  activities. Each completed activity is written to the workflow's history, so if
+  the *workflow* is retried or replayed it never re-runs a finished activity. This
+  is the default, cheapest checkpoint — reach for it first.
+- **Within one activity (heartbeat details).** Use the pattern above when a single
+  activity is long and you want to resume mid-flight without splitting it. More
+  control, but you own the resume logic.
+
+Rule of thumb: many small activities give you automatic checkpoints for free;
+one big activity with heartbeats is for when the work genuinely can't be split.
