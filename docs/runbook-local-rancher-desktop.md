@@ -263,11 +263,22 @@ this local setup; see the research repo's `multi-tenancy-setup.md`.
 
 ---
 
+## Metrics and dashboards (optional)
+
+To add Prometheus + Grafana with the two official Temporal dashboards (server
+health + per-team SDK metrics), follow [`observability.md`](observability.md).
+In short: install kube-prometheus-stack, enable the Temporal server
+ServiceMonitor, run the workers in-cluster (`deploy/local/40-workers.yaml`), and
+load the dashboard ConfigMaps.
+
 ## Teardown
 
 ```bash
 helm uninstall temporal -n temporal --kube-context rancher-desktop
 kubectl --context rancher-desktop delete namespace temporal
+# if you installed the monitoring stack:
+helm uninstall monitoring -n monitoring --kube-context rancher-desktop
+kubectl --context rancher-desktop delete namespace monitoring
 ```
 
 The PostgreSQL PersistentVolumeClaim is removed with the namespace, so this is a

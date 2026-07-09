@@ -1,0 +1,40 @@
+# Helm values for the LOCAL monitoring stack (Rancher Desktop).
+#
+# Installs the Prometheus Operator, a Prometheus, and Grafana — trimmed to what
+# the Temporal dashboards need (no alertmanager, node-exporter, kube-state-metrics
+# or default rules, to keep the laptop footprint small).
+#
+#   helm install monitoring prometheus-community/kube-prometheus-stack \
+#     -n monitoring --create-namespace \
+#     -f deploy/local/monitoring/kube-prometheus-stack-values.yaml
+#
+# On GKE you typically already run Prometheus + Grafana, so you do NOT install
+# this — you apply only the ServiceMonitors and dashboards. See deploy/gcp/.
+
+alertmanager: { enabled: false }
+nodeExporter: { enabled: false }
+kubeStateMetrics: { enabled: false }
+defaultRules: { create: false }
+
+prometheus:
+  prometheusSpec:
+    # Discover ServiceMonitors in ALL namespaces regardless of their labels, so
+    # the Temporal server + worker ServiceMonitors are picked up.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorNamespaceSelector: {}
+    podMonitorSelectorNilUsesHelmValues: false
+    retention: 6h
+    resources:
+      requests: { cpu: 100m, memory: 400Mi }
+
+grafana:
+  # Local-only admin password (documented, not a secret). Change/omit on GKE.
+  adminPassword: admin
+  defaultDashboardsEnabled: false   # skip the bundled k8s dashboards; we load Temporal's
+  sidecar:
+    dashboards:
+      enabled: true                 # auto-load ConfigMaps labelled grafana_dashboard=1
+      label: grafana_dashboard
+      searchNamespace: ALL
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }

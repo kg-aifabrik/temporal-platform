@@ -37,8 +37,10 @@ deploy/
     10-postgres.yaml          # in-cluster PostgreSQL (StatefulSet)
     20-temporal-values.yaml   # Helm values — server + PostgreSQL, no auth
     21-temporal-values-auth.yaml  # overlay — turns on JWT RBAC
+    40-workers.yaml           # in-cluster team workers + metrics Service + ServiceMonitor
     auth/
       30-jwks-server.yaml     # nginx serving the JWKS the frontend validates against
+    monitoring/               # Prometheus + Grafana stack values + Temporal dashboards
   gcp/                        # production notes + what changes on GKE/Cloud SQL
 auth/
   tokengen/                   # dependency-free Go tool: signing key + JWKS + tokens
@@ -52,6 +54,7 @@ docs/
   runbook-local-rancher-desktop.md                  # platform operators: stand up the cluster locally
   writing-workflows.md        # team developers: write, run, test, debug a workflow
   activities-and-concurrency.md  # execution model (diagram) + concurrency/reliability scenarios
+  observability.md            # Prometheus + Grafana + official Temporal dashboards
   test-plan.md                # what this repo tests, at which level, and how to run it
 ```
 
@@ -66,6 +69,9 @@ docs/
   **team developers, next level**: how work flows through Temporal (with a
   diagram), then three scenarios — a burst of requests (throttling), persisting
   state, and retrying on failure.
+- [`docs/observability.md`](docs/observability.md) — **metrics + dashboards**:
+  deploy Prometheus + Grafana with the official Temporal server and SDK
+  dashboards (bundled locally, plug into existing monitoring on GKE).
 - [`docs/test-plan.md`](docs/test-plan.md) — **what this repo tests**: unit,
   determinism/replay, end-to-end, RBAC, and smoke checks, at which level and how
   to run each.

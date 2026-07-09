@@ -1,0 +1,99 @@
+# Team workers running IN-CLUSTER (the production shape), each exposing SDK
+# metrics on :9090 for Prometheus to scrape via the ServiceMonitor below.
+#
+# Images are built locally and used directly by k3s (Rancher Desktop shares the
+# docker image store with the cluster), so imagePullPolicy is Never. On GKE these
+# are real registry images pushed by CI (see deploy/gcp/).
+#
+# Build before applying (see RUNBOOK):
+#   docker build --build-arg TEAM=team-a -t temporal-worker-team-a:dev workers/
+#   docker build --build-arg TEAM=team-b -t temporal-worker-team-b:dev workers/
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-team-a
+  namespace: temporal
+  labels: { app: worker-team-a, temporal-worker: "true" }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: worker-team-a } }
+  template:
+    metadata:
+      labels: { app: worker-team-a, temporal-worker: "true" }
+    spec:
+      containers:
+        - name: worker
+          image: temporal-worker-team-a:dev
+          imagePullPolicy: Never
+          ports:
+            - { name: metrics, containerPort: 9090 }
+          env:
+            - { name: TEMPORAL_ADDRESS, value: "temporal-frontend.temporal.svc:7233" }
+            - { name: TEMPORAL_NAMESPACE, value: "team-a" }
+            - { name: TEMPORAL_METRICS_ADDR, value: ":9090" }
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { memory: 128Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: worker-team-a
+  namespace: temporal
+  labels: { temporal-worker: "true" }
+spec:
+  selector: { app: worker-team-a }
+  ports:
+    - { name: metrics, port: 9090, targetPort: metrics }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-team-b
+  namespace: temporal
+  labels: { app: worker-team-b, temporal-worker: "true" }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: worker-team-b } }
+  template:
+    metadata:
+      labels: { app: worker-team-b, temporal-worker: "true" }
+    spec:
+      containers:
+        - name: worker
+          image: temporal-worker-team-b:dev
+          imagePullPolicy: Never
+          ports:
+            - { name: metrics, containerPort: 9090 }
+          env:
+            - { name: TEMPORAL_ADDRESS, value: "temporal-frontend.temporal.svc:7233" }
+            - { name: TEMPORAL_NAMESPACE, value: "team-b" }
+            - { name: TEMPORAL_METRICS_ADDR, value: ":9090" }
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { memory: 128Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: worker-team-b
+  namespace: temporal
+  labels: { temporal-worker: "true" }
+spec:
+  selector: { app: worker-team-b }
+  ports:
+    - { name: metrics, port: 9090, targetPort: metrics }
+---
+# One ServiceMonitor covering both teams' worker metrics services.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: temporal-workers
+  namespace: temporal
+  labels: { release: monitoring }
+spec:
+  selector:
+    matchLabels: { temporal-worker: "true" }
+  endpoints:
+    - { port: metrics, path: /metrics, interval: 15s }

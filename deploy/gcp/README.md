@@ -18,6 +18,7 @@ is notes + a values skeleton, not an applied environment.
 | Web UI auth | pointed at internal-frontend (bypasses auth) | **OIDC login**, talks to the authorized external frontend |
 | TLS | off (localhost) | mutual TLS on the frontend; TLS to Cloud SQL |
 | Ingress | `kubectl port-forward` | internal load balancer / gRPC-capable ingress for the frontend; ingress for the UI |
+| Metrics/dashboards | bundle kube-prometheus-stack | use the cluster's existing Prometheus + Grafana; apply only the ServiceMonitors + dashboards ([observability.md](../../docs/observability.md)) |
 
 ## Persistence values sketch
 

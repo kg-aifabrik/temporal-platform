@@ -1,0 +1,14 @@
+# Temporal Helm overlay that turns on the server ServiceMonitor, so Prometheus
+# scrapes the frontend/history/matching/worker metrics endpoints (port 9090).
+#
+# Layered on top of the base values AFTER the monitoring stack is installed
+# (the ServiceMonitor CRD must exist first):
+#
+#   helm upgrade temporal temporal/temporal -n temporal \
+#     -f deploy/local/20-temporal-values.yaml \
+#     -f deploy/local/monitoring/temporal-metrics-values.yaml
+server:
+  metrics:
+    serviceMonitor:
+      enabled: true
+      interval: 15s

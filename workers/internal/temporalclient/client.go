@@ -36,6 +36,9 @@ func New() (client.Client, error) {
 	if tok := os.Getenv("TEMPORAL_AUTH_TOKEN"); tok != "" {
 		opts.HeadersProvider = bearerHeaders{token: tok}
 	}
+	if h := metricsHandler(); h != nil { // Prometheus SDK metrics when TEMPORAL_METRICS_ADDR is set
+		opts.MetricsHandler = h
+	}
 	return client.Dial(opts)
 }
 
