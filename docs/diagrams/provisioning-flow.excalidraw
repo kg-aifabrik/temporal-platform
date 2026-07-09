@@ -1402,13 +1402,13 @@
       "y": 250,
       "width": 430,
       "height": 113.75,
-      "text": "Mental model correction:\nA workflow is NOT pre-sliced into activities. The\nworkflow code runs on a Worker; as it executes it\nemits commands, and the server schedules each\nactivity task when the code reaches it. The server\n+ DB persist state and hand out tasks — they don’t\nrun your code.",
+      "text": "How it works:\nA workflow is not pre-sliced into activities. The\nworkflow code runs on a Worker; as it executes it\nemits commands, and the server schedules each\nactivity task when the code reaches it. The server\n+ DB persist state and hand out tasks — they don’t\nrun your code.",
       "fontSize": 13,
       "fontFamily": 1,
       "textAlign": "left",
       "verticalAlign": "top",
       "containerId": null,
-      "originalText": "Mental model correction:\nA workflow is NOT pre-sliced into activities. The\nworkflow code runs on a Worker; as it executes it\nemits commands, and the server schedules each\nactivity task when the code reaches it. The server\n+ DB persist state and hand out tasks — they don’t\nrun your code.",
+      "originalText": "How it works:\nA workflow is not pre-sliced into activities. The\nworkflow code runs on a Worker; as it executes it\nemits commands, and the server schedules each\nactivity task when the code reaches it. The server\n+ DB persist state and hand out tasks — they don’t\nrun your code.",
       "lineHeight": 1.25,
       "baseline": 13
     }

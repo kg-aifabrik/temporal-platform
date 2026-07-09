@@ -43,7 +43,7 @@ Walking the flow:
 5. The result is persisted, the server schedules the next Workflow Task, the
    worker resumes your code, and the loop repeats until the workflow completes.
 
-Two corrections to the intuition most people start with:
+Two points worth getting straight:
 
 - **A workflow is not pre-sliced into activities.** Your workflow code *runs* on
   a worker, and it schedules each activity when the code reaches it. The server
