@@ -9,7 +9,7 @@ Two environments share the same design:
 
 - **Local** — Temporal on a [Rancher Desktop](https://rancherdesktop.io)
   Kubernetes cluster with an in-cluster PostgreSQL. This is what
-  [`docs/runbook.md`](docs/runbook.md) walks you through, end to end, in about 15 minutes.
+  [`docs/runbook-local-rancher-desktop.md`](docs/runbook-local-rancher-desktop.md) walks you through, end to end, in about 15 minutes.
 - **Production (GCP)** — the same chart and topology on Google Kubernetes Engine
   (GKE) with Cloud SQL for PostgreSQL. See [`deploy/gcp/`](deploy/gcp/) for the
   differences. The design rationale lives in the companion research repo
@@ -49,7 +49,7 @@ workers/
   internal/temporalclient/    # shared client (attaches the bearer token)
   Dockerfile                  # in-cluster/production worker image
 docs/
-  runbook.md                  # platform operators: stand up the cluster locally
+  runbook-local-rancher-desktop.md                  # platform operators: stand up the cluster locally
   writing-workflows.md        # team developers: write, run, test, debug a workflow
   activities-and-concurrency.md  # concurrency throttling, long-running + idempotent activities
   test-plan.md                # what this repo tests, at which level, and how to run it
@@ -57,7 +57,7 @@ docs/
 
 ## Guides
 
-- [`docs/runbook.md`](docs/runbook.md) — **platform operators**: stand up the whole cluster
+- [`docs/runbook-local-rancher-desktop.md`](docs/runbook-local-rancher-desktop.md) — **platform operators**: stand up the whole cluster
   locally on Rancher Desktop, end to end.
 - [`docs/writing-workflows.md`](docs/writing-workflows.md) — **team developers**:
   onboard a new team (team-c), then write, run, test, commit, and debug workflows;
@@ -72,7 +72,7 @@ docs/
 
 ## Quick start
 
-Follow [`docs/runbook.md`](docs/runbook.md). In short: create the namespace and DB secret,
+Follow [`docs/runbook-local-rancher-desktop.md`](docs/runbook-local-rancher-desktop.md). In short: create the namespace and DB secret,
 deploy PostgreSQL, install the Temporal Helm chart, create the two namespaces,
 run the workers, start some workflows, then layer on RBAC.
 

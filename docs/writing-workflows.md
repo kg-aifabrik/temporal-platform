@@ -11,7 +11,7 @@ and tests, and commits them. The platform team owns everything else: the cluster
 and the continuous-integration and continuous-deployment (CI/CD) pipeline that
 builds your worker and deploys it to the shared dev, staging, and production
 environments. You run a worker on your own machine only while developing. The
-platform is assumed to be already running (see [`runbook.md`](runbook.md)).
+platform is assumed to be already running (see [`runbook-local-rancher-desktop.md`](runbook-local-rancher-desktop.md)).
 
 ## Mental model
 
@@ -111,7 +111,7 @@ go run ./auth/tokengen -out ./auth/out   # writes tokens/{erin,frank,grace,worke
 Nothing else on the cluster changes. tokengen signs with the key the frontend
 already trusts, so the new tokens work right away — no restart. (How the signing
 key and the key set the frontend validates against fit together is in
-[`runbook.md`](runbook.md) §6.)
+[`runbook-local-rancher-desktop.md`](runbook-local-rancher-desktop.md) §6.)
 
 Production does this step differently: an identity provider (Google, Okta,
 Keycloak) issues tokens when people log in, and you add the three members to a

@@ -11,8 +11,8 @@ Status legend: ✅ automated · 🔶 manual (documented, reproducible) · ⬜ pl
 |---|---|---|---|---|
 | 1 | Unit — workflow logic | Each team's workflow orchestrates its activities correctly | `go test ./...` (time-skipping env, mocked activities) | ✅ |
 | 2 | Determinism / replay | A code change won't break workflows already running | `WorkflowReplayer` against saved histories, in CI | ⬜ |
-| 3 | Integration / e2e | Deploy → start workflows → they complete; retry is recorded | [`runbook.md`](runbook.md) §4, or `scripts/e2e.sh` | 🔶 |
-| 4 | Authorization (RBAC) | read-all / write-own / deny, per the policy | [`runbook.md`](runbook.md) §6e matrix | 🔶 |
+| 3 | Integration / e2e | Deploy → start workflows → they complete; retry is recorded | [`runbook-local-rancher-desktop.md`](runbook-local-rancher-desktop.md) §4, or `scripts/e2e.sh` | 🔶 |
+| 4 | Authorization (RBAC) | read-all / write-own / deny, per the policy | [`runbook-local-rancher-desktop.md`](runbook-local-rancher-desktop.md) §6e matrix | 🔶 |
 | 5 | Infrastructure smoke | PostgreSQL + both DBs, cluster health, pods ready, JWKS reachable | commands below | 🔶 |
 
 ---
@@ -59,7 +59,7 @@ workers connect, workflows are started and run to completion, and the deliberate
 into the runbook; the intent is to lift it into a script (`scripts/e2e.sh`) that
 a continuous-integration runner can execute against a disposable cluster.
 
-Run it manually per [`runbook.md`](runbook.md) §2–4. The assertions that must hold:
+Run it manually per [`runbook-local-rancher-desktop.md`](runbook-local-rancher-desktop.md) §2–4. The assertions that must hold:
 
 ```bash
 A=127.0.0.1:7233
@@ -129,8 +129,8 @@ kubectl $CTX -n temporal exec deploy/temporal-frontend -- wget -qO- http://tempo
 # Unit (no cluster needed):
 cd workers && go test ./... && cd ..
 
-# Integration + RBAC + smoke (needs the local cluster from runbook.md):
-#   follow runbook.md §2–6, then the assertions in sections 3–5 above.
+# Integration + RBAC + smoke (needs the local cluster from runbook-local-rancher-desktop.md):
+#   follow runbook-local-rancher-desktop.md §2–6, then the assertions in sections 3–5 above.
 ```
 
 ## Continuous integration (recommended)
