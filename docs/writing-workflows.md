@@ -6,9 +6,12 @@ document we use **team-c** as a team that is coming on board. You can use
 **team-a** — the bare-metal → OS → Kubernetes provisioning pipeline in
 [`workers/team-a`](../workers/team-a) — as a reference during your journey.
 
-You don't operate the cluster; the platform team does. You write code that
-connects to it. The platform is assumed to be already running (see
-[`runbook.md`](runbook.md)).
+Here's the split in responsibility. Your team writes the workflows, activities,
+and tests, and commits them. The platform team owns everything else: the cluster,
+and the continuous-integration and continuous-deployment (CI/CD) pipeline that
+builds your worker and deploys it to the shared dev, staging, and production
+environments. You run a worker on your own machine only while developing. The
+platform is assumed to be already running (see [`runbook.md`](runbook.md)).
 
 ## Mental model
 
@@ -27,9 +30,11 @@ just detail.
   retries them for you. Anything non-deterministic lives here. *Example: "install
   the OS by calling Rafay" is an activity; if Rafay times out, Temporal runs it
   again.*
-- **Worker** — your process. It holds your workflow and activity code and polls a
-  task queue for work to run. Your team owns and runs it; the platform team runs
-  the cluster, not your worker. *Example: team-c's worker runs team-c's code and
+- **Worker** — the process that runs your code. It holds your workflow and
+  activity code and polls a task queue for work. You run one on your laptop while
+  developing; in the shared environments the platform's pipeline runs it for you
+  (see *How your code ships to shared environments*). Your team owns the code;
+  the platform owns running it. *Example: team-c's worker runs team-c's code and
   watches the `team-c-tq` queue.*
 - **Task queue** — a named line that connects a workflow start to your worker.
   Starting a workflow drops work on the queue; your worker picks it up. *Example:
@@ -224,7 +229,10 @@ temporal workflow start -n team-c --task-queue team-c-tq \
 temporal workflow show -n team-c --workflow-id greet-1   # -> result: "hello world"
 ```
 
-That's the whole loop. Everything else is making the workflow do more.
+Running the worker like this is your local development loop — quick iteration on
+your machine. You never run it this way against the shared environments; the
+platform pipeline does that (see *How your code ships to shared environments*).
+Everything else is making the workflow do more.
 
 ## Growing into a real pipeline (team-a)
 
@@ -267,27 +275,113 @@ smaller ones), signals (send data into a running workflow), queries (read its
 state), continue-as-new (restart a long-runner with a fresh history), and
 Schedules (a cron replacement).
 
-## Test before you deploy
+## Writing tests
 
-This matters a lot in Temporal: because a workflow replays its history, a code
-change can break workflows that are already running. Two tests catch that.
+Tests are a bigger deal in Temporal than in most systems. Because a workflow
+rebuilds its state by replaying its history, a change to workflow code can break
+workflows that are already running. Your tests are also the gate the platform's
+CI pipeline enforces before your code ships. Write two kinds, plus test your
+activities.
 
-**A unit test with time-skipping.** Mock the activities, run the workflow, and
-check the result. No server needed, and it finishes in milliseconds. See
-[`workers/team-a/workflow_test.go`](../workers/team-a/workflow_test.go):
+### Unit test: does the workflow orchestrate correctly?
 
-```bash
-cd workers && go test ./team-a/ -v
-# --- PASS: TestProvisionClusterWorkflow (0.04s)
+Use the SDK's time-skipping test environment. It runs the workflow with no
+Temporal server, fires durable timers instantly (a `workflow.Sleep(24h)` returns
+at once), and lets you mock the activities so the test exercises the
+orchestration, not the activity bodies. Here's a test for team-c's
+`GreetingWorkflow`, in `workers/team-c/workflow_test.go`:
+
+```go
+package main
+
+import (
+    "testing"
+
+    "github.com/stretchr/testify/mock"
+    "github.com/stretchr/testify/require"
+    "go.temporal.io/sdk/testsuite"
+)
+
+func TestGreetingWorkflow(t *testing.T) {
+    var ts testsuite.WorkflowTestSuite
+    env := ts.NewTestWorkflowEnvironment()
+
+    // Mock the activity: when Greet is called with "world", return this.
+    env.OnActivity(Greet, mock.Anything, "world").Return("hello world", nil)
+
+    env.ExecuteWorkflow(GreetingWorkflow, "world")
+
+    require.True(t, env.IsWorkflowCompleted())
+    require.NoError(t, env.GetWorkflowError())
+
+    var result string
+    require.NoError(t, env.GetWorkflowResult(&result))
+    require.Equal(t, "hello world", result)
+}
 ```
 
-team-c writes its own `workers/team-c/workflow_test.go` in the same shape — copy
-team-a's or team-b's as a template. The whole suite runs with `go test ./...`.
+Run it:
 
-**A replay test, the safety net.** Before you deploy a change, replay real
-histories against the new code. If the logic diverges, the replayer fails, and
-you've caught the problem before it reaches a running workflow. Wire this into
-continuous integration so a bad change can't merge.
+```bash
+cd workers && go test ./team-c/ -v
+```
+
+When the workflow has several activities and a retry, like team-a, you mock each
+one the same way and assert the final result. Two worked examples ship in the
+repo — read them as templates:
+[`workers/team-a/workflow_test.go`](../workers/team-a/workflow_test.go) and
+[`workers/team-b/workflow_test.go`](../workers/team-b/workflow_test.go). Name each
+test by the behavior it proves.
+
+### Test your activities too
+
+An activity is an ordinary function that does real work, so test it like ordinary
+Go: call it and assert on the result. If it needs a Temporal context (for
+heartbeats or `activity.GetInfo`), run it through the activity test environment:
+
+```go
+env := (&testsuite.WorkflowTestSuite{}).NewTestActivityEnvironment()
+val, err := env.ExecuteActivity(Greet, "world")
+require.NoError(t, err)
+var out string
+require.NoError(t, val.Get(&out))
+require.Equal(t, "hello world", out)
+```
+
+Keep real network/database calls out of unit tests — mock them, and leave the
+full end-to-end checks to the platform's staging environment.
+
+### Replay test: will a change break running workflows?
+
+This is the safety net for the replay problem above. Export a real history and
+replay it against your current code; if the new logic would diverge from what a
+running workflow already recorded, the replayer fails:
+
+```bash
+temporal workflow show -n team-c --workflow-id greet-1 --output json > \
+  workers/team-c/testdata/greet-1.json
+```
+
+```go
+func TestReplay(t *testing.T) {
+    replayer := worker.NewWorkflowReplayer()
+    replayer.RegisterWorkflow(GreetingWorkflow)
+    err := replayer.ReplayWorkflowHistoryFromJSONFile(nil, "testdata/greet-1.json")
+    require.NoError(t, err)   // fails if the new code is incompatible with the old history
+}
+```
+
+The platform pipeline runs this as a required check, so a change that would wedge
+in-flight workflows can't merge.
+
+### Running the whole suite
+
+```bash
+cd workers && go test ./...
+```
+
+This is exactly what CI runs on your pull request. Green here means your change
+is safe to ship.
 
 ## Commit your work
 
@@ -312,6 +406,33 @@ git add workers/team-c auth/tokengen/main.go
 git commit -m "team-c: onboard with greeting workflow"
 git push -u origin team-c-onboarding
 ```
+
+## How your code ships to shared environments
+
+You don't deploy workers to the shared environments yourself. You commit tested
+code, and the platform's CI/CD pipeline takes it from there:
+
+- **You** build the workflow, activities, and tests in `workers/team-c/`, get
+  `go test ./...` green, and open a pull request.
+- **CI** runs that same suite (unit + replay) on the pull request. A red build
+  does not merge.
+- **CD**, on merge, builds the worker image
+  ([`workers/Dockerfile`](../workers/Dockerfile)) and rolls it out as a
+  Kubernetes Deployment into each environment in turn — **dev → staging →
+  production** — each pointed at its own namespace (`team-c-dev`,
+  `team-c-staging`, `team-c-prod`). New versions use Worker Versioning, so
+  workflows already running finish on the code that started them.
+- **You** verify in **staging** — the same UI and CLI as *Debugging a workflow*
+  below, pointed at `team-c-staging` — before the change is promoted to
+  production.
+
+So your job ends at "tested code, committed." Building the image, rolling it out,
+scaling, and versioning across environments is the platform's job. See
+[`deploy/gcp/`](../deploy/gcp) for how the shared environments are run.
+
+This repo's local setup is a single environment (one `team-c` namespace), so it
+stands in for dev; the multi-environment pipeline is a platform capability whose
+shape is described above.
 
 ## Debugging a workflow
 
@@ -372,13 +493,6 @@ process with `temporal server start-dev` (an in-memory server plus UI on
 `localhost:8233`), point your worker at it, and iterate. Move to the shared
 cluster once it works.
 
-## Deploying your worker for real
-
-Locally you run the worker as a host process. In production it's a Kubernetes
-Deployment built from [`workers/Dockerfile`](../workers/Dockerfile), one image
-per team. Roll out new versions with Worker Versioning so in-flight workflows
-finish on the code that started them. See [`deploy/gcp/`](../deploy/gcp).
-
 ## Checklist
 
 - [ ] **Onboarded**: namespace created, and (under RBAC) member and worker tokens issued.
@@ -386,5 +500,6 @@ finish on the code that started them. See [`deploy/gcp/`](../deploy/gcp).
 - [ ] Workflow is deterministic — all I/O, clocks, and randomness in activities.
 - [ ] Activities have timeouts and a retry policy.
 - [ ] `workflow.Sleep`, not `time.Sleep`, inside workflows.
-- [ ] A time-skipping unit test, and a replay test in CI.
 - [ ] Worker registers every workflow and activity it uses.
+- [ ] Tests written and green (`go test ./...`): time-skipping unit test, activity tests, replay test.
+- [ ] Code committed on a branch and opened as a PR — the platform pipeline deploys it; you verify in staging.
