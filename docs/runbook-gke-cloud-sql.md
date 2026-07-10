@@ -27,7 +27,7 @@ So the secretless chain is: KSA `temporal` → (Workload Identity) → GSA
 
 ## Prerequisites
 
-- **gcloud** authenticated (`gcloud auth login` + `gcloud auth application-default login`) with rights on the project, and **`gke-gcloud-auth-plugin`** installed (the private cluster is reached over Connect Gateway).
+- **gcloud** authenticated (`gcloud auth login` + `gcloud auth application-default login`) with rights on the project, and **`gke-gcloud-auth-plugin`** installed. The nodes are private, but the control plane exposes a public endpoint; `get-credentials` wires `kubectl` to it and the plugin mints a short-lived Google OAuth token for each call.
 - **kubectl**, **helm** v3.8+ (tested on v4), **docker**, and the **temporal** CLI.
 - The **`iac-gke`** repo checked out (the cluster factory).
 - Convenience vars used below:
@@ -83,7 +83,7 @@ gcloud sql databases list --instance $INST --project $PROJECT   # temporal, temp
 
 ```bash
 gcloud container clusters get-credentials dev-fop --region $REGION --project $PROJECT
-kubectl get nodes    # nodes Ready (reached over Connect Gateway)
+kubectl get nodes    # nodes Ready (kubectl talks to the control-plane public endpoint)
 ```
 
 ## Layer 3 — Temporal identity + IAM database auth
