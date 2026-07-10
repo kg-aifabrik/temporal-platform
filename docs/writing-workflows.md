@@ -13,6 +13,8 @@ builds your worker and deploys it to the shared dev, staging, and production
 environments. You run a worker on your own machine only while developing. The
 platform is assumed to be already running (see [`runbook-local-rancher-desktop.md`](runbook-local-rancher-desktop.md)).
 
+![How a team ships a workflow: team-c writes the workflow + activities + tests and commits; CI builds the image and runs tests; CD deploys to Staging; the team verifies, then it's promoted to Production. The platform team owns the cluster and CI/CD; team-c owns only the code](diagrams/workflow-lifecycle.png)
+
 ## Mental model
 
 There are primarily four concepts. Once they click, the rest of this guide is

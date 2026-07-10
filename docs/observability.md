@@ -28,6 +28,8 @@ and the per-workflow execution panels:
 
 ## Where the metrics come from
 
+![Metrics pipeline: the Temporal server and the workers (OTel) each expose /metrics; ServiceMonitors tell Prometheus what to scrape; Grafana renders the Server and Go SDK dashboards](diagrams/metrics-pipeline.png)
+
 | Metrics | Source | Scraped via |
 |---|---|---|
 | Server / internal | Each Temporal service exposes Prometheus metrics on port 9090 | Temporal chart's **ServiceMonitor** (`server.metrics.serviceMonitor.enabled`) |

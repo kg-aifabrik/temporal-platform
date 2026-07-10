@@ -24,12 +24,7 @@ Two moves cover almost every frontend:
 - **Get status** → `client.DescribeWorkflowExecution(...)` for the overall state,
   plus `client.QueryWorkflow(...)` for the detailed, in-flight progress.
 
-```
-caller ──gRPC──▶ ProvisioningService ──Temporal client──▶ temporal-frontend:7233
-   ▲  Submit → ExecuteWorkflow (returns run id immediately)      │
-   │  GetStatus → DescribeWorkflowExecution + QueryWorkflow      ▼
-   └──────────────────────── status ◀────────── workers run the workflow + activities
-```
+![gRPC frontend as a Temporal client: Submit maps to ExecuteWorkflow, GetStatus to DescribeWorkflowExecution + QueryWorkflow, workers run the workflow](diagrams/api-frontend-flow.png)
 
 The frontend knows the backend only by **contract**: the workflow type name
 (`ProvisionClusterWorkflow`), the task queue (`provisioning-tq`), the input shape,

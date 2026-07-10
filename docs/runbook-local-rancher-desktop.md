@@ -8,6 +8,8 @@ At the end you have: Temporal + Web UI on Kubernetes backed by in-cluster
 PostgreSQL, two team namespaces each running their own workflow, and RBAC where
 any member reads everything but only modifies their own team's workflows.
 
+![Local stack on Rancher Desktop k3s: the Mac reaches the cluster by port-forward; inside, the Temporal server + Web UI read/write an in-cluster PostgreSQL StatefulSet, two team workers and a JWKS server connect to the server, and kube-prometheus-stack scrapes metrics](diagrams/local-topology.png)
+
 ## Prerequisites
 
 - **Rancher Desktop** with the Kubernetes cluster enabled (verified on k3s

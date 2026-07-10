@@ -25,6 +25,8 @@ Workers never connect to the database; they reach the frontend over gRPC.
 So the secretless chain is: KSA `temporal` → (Workload Identity) → GSA
 `temporal-sql@` → (`roles/cloudsql.instanceUser` + `client`) → Cloud SQL IAM user.
 
+![GKE + Cloud SQL traffic flow: the laptop reaches the control-plane public endpoint (IAM token via gke-gcloud-auth-plugin) and port-forwards through the API server to pods; private nodes run the Temporal server whose Cloud SQL Auth Proxy sidecar reaches Cloud SQL's private IP with IAM auth and no password](diagrams/gke-connectivity.png)
+
 ## Prerequisites
 
 - **gcloud** authenticated (`gcloud auth login` + `gcloud auth application-default login`) with rights on the project, and **`gke-gcloud-auth-plugin`** installed. The nodes are private, but the control plane exposes a public endpoint; `get-credentials` wires `kubectl` to it and the plugin mints a short-lived Google OAuth token for each call.
