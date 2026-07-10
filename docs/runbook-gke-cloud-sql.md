@@ -265,6 +265,34 @@ Checklist:
 - [ ] Prometheus targets for the server + both workers are `up`; Grafana shows the server + SDK dashboards with data (`temporal_workflow_completed`).
 - [ ] **No database password exists** — `kubectl -n temporal get secret temporal-default-store -o jsonpath='{.data.password}' | base64 -d` is empty; the server connects via the proxy as the IAM user.
 
+## Accessing the Web UI and Grafana
+
+Both are private ClusterIP services on a private cluster — there is no public URL.
+Reach them from your workstation by tunnelling over your cluster credentials with
+`kubectl port-forward`. Credentials are already set from Layer 2; in a fresh shell,
+re-run `gcloud container clusters get-credentials dev-fop --region $REGION --project $PROJECT` first.
+
+**Temporal Web UI** — in one terminal:
+```bash
+kubectl -n temporal port-forward svc/temporal-web 8080:8080
+# → http://localhost:8080   (namespaces compute-provisioning and team-b under Workflows)
+```
+
+**Grafana** — in a second terminal:
+```bash
+kubectl -n monitoring port-forward svc/monitoring-grafana 3000:80
+# → http://localhost:3000
+# login: admin / (fetch the password)
+kubectl -n monitoring get secret monitoring-grafana -o jsonpath='{.data.admin-password}' | base64 -d; echo
+```
+The two dashboards are "Temporal Server Metrics" and "Temporal Go SDK (OTel) Metrics".
+
+Notes:
+- `port-forward` runs in the foreground — keep each in its own tab, or append `&` to
+  background it. Stop with Ctrl-C.
+- If a local port is busy, change the left number (e.g. `9080:8080`) and use that port.
+- The tunnel drops if the pod restarts; just re-run the command.
+
 ## Teardown
 
 ```bash
