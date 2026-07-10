@@ -48,7 +48,7 @@ spec:
             - { name: SQL_PORT, value: "5432" }
             - { name: SQL_USER, value: "__TEMPORAL_DB_IAM_USER__" }
             # No SQL_PASSWORD: the proxy injects the IAM token as the credential.
-          command: ["/bin/bash", "-ec"]
+          command: ["/bin/sh", "-ec"]   # admin-tools is Alpine/busybox: sh, not bash
           args:
             - |
               base=/etc/temporal/schema/postgresql/v12

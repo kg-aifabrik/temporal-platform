@@ -19,14 +19,14 @@ shims:
   dockerize: false
   elasticsearchTool: false
 
-# The server's Kubernetes service account, Workload-Identity-bound to the GSA
-# that holds roles/cloudsql.client + cloudsql.instanceUser. The proxy sidecar
-# picks up this identity from the metadata server.
+# Use the pre-created Kubernetes service account "temporal" (namespace temporal),
+# which the runbook annotates and Workload-Identity-binds to the GSA that holds
+# roles/cloudsql.client + cloudsql.instanceUser. It is created before install so
+# the one-off schema Job can run under the same identity; the chart just consumes
+# it here. The proxy sidecar picks up this identity from the metadata server.
 serviceAccount:
-  create: true
+  create: false
   name: temporal
-  extraAnnotations:
-    iam.gke.io/gcp-service-account: __TEMPORAL_GSA_EMAIL__
 
 server:
   replicaCount: 1
@@ -91,10 +91,16 @@ server:
       enabled: true
       interval: 15s
 
-# Schema setup is run as a controlled one-off Job (with the same proxy sidecar),
-# because the chart's schema hook Job can't carry the Auth Proxy. See the runbook.
+# Schema is set up out-of-band by deploy/gcp/schema-job.yaml (with the Auth Proxy
+# sidecar), because the chart's own schema Job can't carry the proxy and so can't
+# reach Cloud SQL. The chart (1.5.0) has no switch to skip that Job, so:
+#   useHelmHooks: false  -> it runs as a normal Job, not a pre-install hook, so it
+#                           does not block the server pods (which use our schema).
+#   backoffLimit: 0      -> it fails once (no proxy) and stops, instead of retrying
+#                           100x. That one failed Job is expected; ignore it.
 schema:
   useHelmHooks: false
+  backoffLimit: 0
 
 web:
   enabled: true
