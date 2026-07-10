@@ -1,0 +1,49 @@
+# ProvisioningService gRPC frontend, deployed into the shared Temporal cluster.
+#
+# It is a Temporal *client* — it dials the frontend over gRPC and needs no
+# database access, no Cloud SQL proxy, and no Workload Identity. The default
+# service account is enough.
+#
+# Substitute the Artifact Registry repo at deploy time (see
+# docs/api-frontend-for-temporal.md):
+#   __AR_REPO__   us-central1-docker.pkg.dev/<project>/app
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-api-frontend
+  namespace: temporal
+  labels: { app: temporal-api-frontend }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: temporal-api-frontend } }
+  template:
+    metadata:
+      labels: { app: temporal-api-frontend }
+    spec:
+      containers:
+        - name: server
+          image: __AR_REPO__/temporal-api-frontend:dev
+          ports:
+            - { name: grpc, containerPort: 9233 }
+          env:
+            - { name: TEMPORAL_ADDRESS, value: "temporal-frontend.temporal.svc:7233" }
+            - { name: TEMPORAL_NAMESPACE, value: "compute-provisioning" }
+            - { name: GRPC_PORT, value: "9233" }
+          readinessProbe:
+            grpc: { port: 9233 }
+            initialDelaySeconds: 3
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { memory: 64Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-api-frontend
+  namespace: temporal
+  labels: { app: temporal-api-frontend }
+spec:
+  selector: { app: temporal-api-frontend }
+  ports:
+    - { name: grpc, port: 9233, targetPort: grpc }

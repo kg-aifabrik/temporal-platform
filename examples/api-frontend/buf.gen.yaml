@@ -1,0 +1,12 @@
+version: v2
+# Generated Go code is committed under gen/ so the example builds without buf.
+# Regenerate after editing the .proto:  PATH="$PATH:$(go env GOPATH)/bin" buf generate
+managed:
+  enabled: false
+plugins:
+  - local: protoc-gen-go
+    out: gen
+    opt: paths=source_relative
+  - local: protoc-gen-go-grpc
+    out: gen
+    opt: paths=source_relative

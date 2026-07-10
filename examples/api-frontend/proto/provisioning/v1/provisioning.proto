@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+package provisioning.v1;
+
+option go_package = "github.com/kg-aifabrik/temporal-platform/examples/api-frontend/gen/provisioning/v1;provisioningv1";
+
+// ProvisioningService is the gRPC entry point that fronts the Temporal
+// ProvisionClusterWorkflow. Callers submit provisioning requests and poll their
+// status; the service translates those calls into Temporal client operations
+// (start workflow, describe execution, query workflow). Nothing here knows how
+// provisioning actually works — that lives in the workflow and its activities.
+service ProvisioningService {
+  // SubmitProvisioningRequest starts a cluster provisioning workflow and returns
+  // its identifiers. It is idempotent on request_id: re-submitting the same id
+  // while a run is in flight re-attaches to that run instead of starting another.
+  rpc SubmitProvisioningRequest(SubmitProvisioningRequestRequest) returns (SubmitProvisioningRequestResponse);
+
+  // GetProvisioningStatus returns the current execution state plus the detailed
+  // step messages the workflow exposes through a Temporal query.
+  rpc GetProvisioningStatus(GetProvisioningStatusRequest) returns (GetProvisioningStatusResponse);
+}
+
+message SubmitProvisioningRequestRequest {
+  // request_id is the caller's idempotency key and becomes the Temporal workflow
+  // id. If empty, the server derives one from cluster_name. Use a stable, unique
+  // value (e.g. an asset serial) so duplicate submits de-duplicate to one run.
+  string request_id = 1;
+  string cluster_name = 2;
+  int32 node_count = 3;
+}
+
+message SubmitProvisioningRequestResponse {
+  string request_id = 1;  // the workflow id
+  string run_id = 2;      // the workflow run id
+}
+
+message GetProvisioningStatusRequest {
+  string request_id = 1;
+}
+
+// State mirrors Temporal's workflow execution status.
+enum State {
+  STATE_UNSPECIFIED = 0;
+  STATE_RUNNING = 1;
+  STATE_COMPLETED = 2;
+  STATE_FAILED = 3;
+  STATE_CANCELED = 4;
+  STATE_TERMINATED = 5;
+  STATE_TIMED_OUT = 6;
+}
+
+message GetProvisioningStatusResponse {
+  string request_id = 1;
+  string run_id = 2;
+  State state = 3;
+  // current_step and messages come from a Temporal query on the workflow; they
+  // are the human-readable, per-step detail the workflow chooses to publish.
+  string current_step = 4;
+  repeated string messages = 5;
+  // result is the workflow's return summary, set once it completes.
+  string result = 6;
+  // error_message is set when the workflow failed.
+  string error_message = 7;
+}
