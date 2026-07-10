@@ -1,5 +1,7 @@
 # Writing workflows on the shared Temporal platform
 
+> **For workflow developers** — the main guide, covering the whole lifecycle: develop → test → ship → debug.
+
 This document is an overview for a team building, testing, and deploying their
 own workflows on the shared Temporal infrastructure. For the rest of the
 document we use **team-c** as a team that is coming on board. You can use

@@ -1,5 +1,7 @@
 # The execution model, and common concurrency scenarios
 
+> **For workflow developers** — designing workflows for concurrency and reliability.
+
 The next level after [`writing-workflows.md`](writing-workflows.md): how work
 flows through Temporal, and how to handle the concurrency and reliability
 situations a team hits in production. Examples use compute-provisioning's provisioning

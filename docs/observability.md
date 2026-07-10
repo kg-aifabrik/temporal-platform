@@ -1,5 +1,7 @@
 # Metrics and dashboards
 
+> **For platform engineers** (set up the stack) **and workflow developers** (read the dashboards).
+
 Temporal's Web UI inspects individual workflows; metrics and dashboards come from
 Prometheus + Grafana. This project ships both, with two dashboards that work out
 of the box:

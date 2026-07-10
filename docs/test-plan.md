@@ -1,5 +1,7 @@
 # Test plan
 
+> **For workflow developers and platform engineers** — what to test, at which level, and how to run it.
+
 What this repo tests, at which level, and how to run it. It follows the Temporal
 testing pyramid: many fast unit tests on workflow logic, a determinism gate to
 protect running workflows, and a small number of end-to-end and access-control

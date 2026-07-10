@@ -74,37 +74,52 @@ The split in ownership: the **platform team** owns the cluster, the database,
 RBAC, monitoring, and the CI/CD pipeline that deploys your worker. **Your team**
 owns only the workflow code, activities, and tests.
 
-## Writing your own workflows
+## For platform engineers
 
-Start here and read in order:
+You own the shared infrastructure — the cluster, the database, access control,
+and monitoring — and you grow it as more teams come aboard. Your path:
 
-- **[docs/writing-workflows.md](docs/writing-workflows.md)** — the main guide:
-  onboard a new team, then write, run, test, commit, and debug a workflow from
-  zero. `compute-provisioning` is the reference example.
-- **Understanding concurrency** —
-  [docs/activities-and-concurrency.md](docs/activities-and-concurrency.md): how
-  work flows through Temporal, then three scenarios — throttling a burst of
-  requests, persisting progress mid-run, and retrying on failure.
-- **Testing your workflows** —
-  [docs/test-plan.md](docs/test-plan.md): what to test and at which level (unit,
-  determinism/replay, end-to-end, RBAC), and how to run each.
-- **Observability** —
-  [docs/observability.md](docs/observability.md): deploy Prometheus + Grafana with
-  the official Temporal server and SDK dashboards.
-- **Exposing a workflow over an API** —
-  [docs/api-frontend-for-temporal.md](docs/api-frontend-for-temporal.md): build a
-  gRPC frontend that submits and tracks workflows, with the worked example in
-  `examples/api-frontend`.
+1. **Learn the shape locally.** Stand up the whole platform on your laptop in
+   about 15 minutes:
+   **[runbooks/runbook-local-rancher-desktop.md](runbooks/runbook-local-rancher-desktop.md)**
+   — two teams, sample workflows, live RBAC, and dashboards.
+2. **Deploy production.** The same platform on GKE + Cloud SQL with IAM database
+   authentication (no stored password):
+   **[runbooks/runbook-gke-cloud-sql.md](runbooks/runbook-gke-cloud-sql.md)**. The
+   cluster and database it runs on are built by the companion
+   [`iac-gke`](https://github.com/kg-aifabrik/iac-gke) repo; what changes from
+   local is spelled out in **[deploy/gcp/README.md](deploy/gcp/README.md)**.
+3. **Operate it.** Wire up metrics and the Temporal dashboards
+   ([docs/observability.md](docs/observability.md)); onboard a team by creating its
+   namespace and issuing tokens
+   ([docs/writing-workflows.md#onboarding](docs/writing-workflows.md#onboarding)).
+4. **Enhance it over time.** Add teams, set per-namespace rate limits, and weigh
+   the auth and visibility trade-offs. The design rationale and the multi-tenancy
+   gaps a platform team must build live in the research repo —
+   `research/temporal/shared-instance-architecture.md` and
+   `research/temporal/multi-tenancy-setup.md`.
 
-## Testing
+## For workflow developers
 
-- **Local, on Rancher Desktop** — the fastest way to see the whole platform run on
-  your own machine: **[runbooks/runbook-local-rancher-desktop.md](runbooks/runbook-local-rancher-desktop.md)**.
-  Two teams, sample workflows, live RBAC, and dashboards in about 15 minutes.
-- **Production, on GKE + Cloud SQL** —
-  [runbooks/runbook-gke-cloud-sql.md](runbooks/runbook-gke-cloud-sql.md): the same
-  platform on GKE, backed by Cloud SQL with IAM database authentication (no stored
-  password), validated end to end.
+You build your team's workflows and shepherd each one from your laptop to
+production. You own the workflow code, activities, and tests; the platform runs
+them. Read **Key concepts** above, then follow the main guide —
+**[docs/writing-workflows.md](docs/writing-workflows.md)** — which takes a new team
+from zero through the whole lifecycle:
+
+| Stage | What you do | Where |
+|---|---|---|
+| **Develop** | write a workflow + activities, run a worker on your laptop | [writing-workflows § Your first workflow](docs/writing-workflows.md#your-first-workflow) |
+| **Design for scale & reliability** | throttle concurrency, persist progress, handle retries | [activities-and-concurrency.md](docs/activities-and-concurrency.md) |
+| **Test** | unit, activity, and replay tests | [writing-workflows § Writing tests](docs/writing-workflows.md#writing-tests) · [test-plan.md](docs/test-plan.md) |
+| **Ship** | commit → the platform's CI/CD builds your worker and deploys it to staging | [writing-workflows § How your code ships](docs/writing-workflows.md#how-your-code-ships-to-shared-environments) |
+| **Verify & promote** | watch it in the Web UI and Grafana in staging, then promote to production | [observability.md](docs/observability.md) |
+| **Debug** | inspect history, query state, reset and replay | [writing-workflows § Debugging a workflow](docs/writing-workflows.md#debugging-a-workflow) |
+
+Triggering workflows from another service or over an API?
+**[docs/api-frontend-for-temporal.md](docs/api-frontend-for-temporal.md)** builds a
+gRPC frontend that submits and tracks workflows with a Temporal Client (worked
+example in `examples/api-frontend`).
 
 > The password and all tokens in the local setup are throwaway — created at
 > runtime and gitignored. Nothing secret is committed.

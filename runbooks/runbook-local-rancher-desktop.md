@@ -1,5 +1,7 @@
 # Runbook: shared Temporal on Rancher Desktop
 
+> **For platform engineers** — stand up the whole platform locally, end to end. Also the fastest way for anyone to see it run.
+
 Stand up a shared Temporal cluster on a local Rancher Desktop Kubernetes cluster,
 with two teams, sample workflows, and JWT role-based access control (RBAC).
 Follow it top to bottom; each layer builds on the previous one.

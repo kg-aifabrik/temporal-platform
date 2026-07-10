@@ -1,5 +1,7 @@
 # A gRPC API frontend for Temporal
 
+> **For workflow developers** — expose a workflow over a gRPC API using a Temporal Client.
+
 A worked example of the standard Temporal entry-point pattern: a Go gRPC + Proto
 service that fronts the `compute-provisioning` `ProvisionClusterWorkflow`. It
 exposes two RPCs — submit a provisioning request, and get its status with detailed

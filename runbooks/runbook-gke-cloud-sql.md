@@ -1,5 +1,7 @@
 # Runbook: shared Temporal on GKE + Cloud SQL
 
+> **For platform engineers** — stand up the production platform on GKE + Cloud SQL with IAM database auth.
+
 Stand up the shared Temporal platform on a hardened GKE cluster with Google
 Cloud SQL for PostgreSQL as the state store, using **IAM database
 authentication** — no stored password anywhere. The GKE cluster and the Cloud
