@@ -7,7 +7,8 @@
 // UI event history.
 //
 // Run:
-//   TEMPORAL_NAMESPACE=compute-provisioning go run ./compute-provisioning
+//
+//	TEMPORAL_NAMESPACE=compute-provisioning go run ./compute-provisioning
 package main
 
 import (
