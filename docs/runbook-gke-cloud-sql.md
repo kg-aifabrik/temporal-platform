@@ -279,20 +279,55 @@ gh workflow run terraform-destroy.yml -f env=dev -f purpose=fop -f confirm=fop
 
 ## Validated (dev, gke-poc-498602, 2026-07-09)
 
-- **Infra:** `dev-fop` RUNNING (node pool autoscaled 3→4 under load); Cloud SQL
-  `dev-fop-temporal-fe83` RUNNABLE, `ENTERPRISE` / `db-custom-1-3840`, private IP
-  `10.43.0.3` (`ipv4Enabled=false`), `cloudsql.iam_authentication=on`; PSA peering
-  `servicenetworking-googleapis-com` active; both databases present.
-- **IAM auth:** the schema Job and all four server services connected to Cloud SQL
-  through the proxy sidecar as `temporal-sql@…iam` with **no password** — the
-  chart's `temporal-default-store` / `temporal-visibility-store` secrets hold empty
-  strings.
-- **Temporal:** `SERVING`; `frontend`/`history`/`matching`/`worker` all `2/2`
-  (server + proxy), plus `web` and `admintools`. Namespaces `compute-provisioning`
-  and `team-b` registered.
-- **Workflows:** 40 started (20 `ProvisionClusterWorkflow` + 20 `OrderWorkflow`),
-  all `Completed`. Server metric `temporal_workflow_completed` = 40.
-- **Observability:** all six scrape targets `up` (4 server services + 2 workers);
-  SDK OTel metrics present; Grafana loaded "Temporal Server Metrics" and "Temporal
-  Go SDK (OTel) Metrics" (identical to the local dashboards — screenshots in
-  [`observability.md`](observability.md)).
+Deployed on the `dev-fop` cluster (node pool autoscaled 3→4 under load) against
+Cloud SQL `dev-fop-temporal-fe83`. IAM database auth worked end-to-end: the schema
+Job and all four server services connected to Cloud SQL through the proxy sidecar
+as `temporal-sql@…iam` with **no password**. 100 workflows across the two team
+namespaces all reached `Completed`, and both Grafana dashboards show live data.
+
+### Validation evidence
+
+```console
+$ # 1. Cloud SQL — private IP + IAM auth
+RUNNABLE  ENTERPRISE  False  10.43.0.3  PRIVATE
+
+$ # 2. Temporal cluster health
+SERVING
+
+$ # 3. Server pods (2/2 = server + Cloud SQL proxy sidecar)
+temporal-frontend-675bd586f7-hss5n  2/2  Running
+temporal-history-8c665d98f-k9k8t    2/2  Running
+temporal-matching-f8446b6db-t2l4c   2/2  Running
+temporal-web-564597588c-lgcck       1/1  Running
+temporal-worker-6469d8dd59-4qc2g    2/2  Running
+worker-compute-provisioning-...     1/1  Running
+worker-team-b-...                   1/1  Running
+
+$ # 4. Workflows Completed per namespace
+compute-provisioning   Total: 50
+team-b                 Total: 50
+
+$ # 5. No DB password — chart store secrets are empty
+temporal-default-store    password="" (length 0)
+temporal-visibility-store password="" (length 0)
+```
+
+All six Prometheus scrape targets (4 server services + 2 workers) reported `up`,
+and the server metric `temporal_workflow_completed` tracked the workflow count.
+
+### Screenshots
+
+Temporal Web UI — `compute-provisioning` namespace, 50/50 `Completed`
+(`ProvisionClusterWorkflow`):
+
+![Temporal Web UI — compute-provisioning workflows, all Completed](images/gke-web-workflows.png)
+
+Grafana — **Temporal Server Metrics** (Actions, service/persistence availability,
+workflow tasks, activities), fed by the server `ServiceMonitor`:
+
+![Grafana Temporal Server Metrics dashboard](images/gke-grafana-server.png)
+
+Grafana — **Temporal Go SDK (OTel) Metrics** (RPC requests vs failures, per-operation
+requests, p95 latencies), fed by the workers' OTel metrics:
+
+![Grafana Temporal Go SDK OTel dashboard](images/gke-grafana-sdk.png)
