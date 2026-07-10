@@ -196,7 +196,7 @@ done
 ```
 
 On a real shared GKE you would instead point the cluster's existing Prometheus /
-Google Managed Prometheus at the ServiceMonitors — see [`observability.md`](observability.md).
+Google Managed Prometheus at the ServiceMonitors — see [`observability.md`](../docs/observability.md).
 
 ## Layer 7 — deploy Temporal
 

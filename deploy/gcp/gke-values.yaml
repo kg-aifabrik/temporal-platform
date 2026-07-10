@@ -7,7 +7,7 @@
 # username and no password. Only the SERVER talks to the database; workers reach
 # the frontend over gRPC and need none of this.
 #
-# Placeholders are substituted at deploy time (see docs/runbook-gke-cloud-sql.md):
+# Placeholders are substituted at deploy time (see runbooks/runbook-gke-cloud-sql.md):
 #   __TEMPORAL_GSA_EMAIL__         temporal-sql@<project>.iam.gserviceaccount.com
 #   __TEMPORAL_DB_IAM_USER__       temporal-sql@<project>.iam   (the GSA email minus ".gserviceaccount.com")
 #   __CLOUD_SQL_CONNECTION_NAME__  <project>:<region>:<instance>  (from `terraform output` / gcloud)

@@ -268,7 +268,7 @@ this local setup; see the research repo's `multi-tenancy-setup.md`.
 ## Metrics and dashboards (optional)
 
 To add Prometheus + Grafana with the two official Temporal dashboards (server
-health + per-team SDK metrics), follow [`observability.md`](observability.md).
+health + per-team SDK metrics), follow [`observability.md`](../docs/observability.md).
 In short: install kube-prometheus-stack, enable the Temporal server
 ServiceMonitor, run the workers in-cluster (`deploy/local/40-workers.yaml`), and
 load the dashboard ConfigMaps.

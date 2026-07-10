@@ -9,7 +9,7 @@
 # The two databases already exist (the iac-gke cloud-sql module created them), so
 # this only sets up and versions the schema inside them.
 #
-# Placeholders substituted at deploy time (see docs/runbook-gke-cloud-sql.md):
+# Placeholders substituted at deploy time (see runbooks/runbook-gke-cloud-sql.md):
 #   __TEMPORAL_DB_IAM_USER__       temporal-sql@<project>.iam
 #   __CLOUD_SQL_CONNECTION_NAME__  <project>:<region>:<instance>
 #

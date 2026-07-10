@@ -6,7 +6,7 @@
 # default service account is enough.
 #
 # Images come from Artifact Registry, pushed by hand or CI. Substitute the repo
-# at deploy time (see docs/runbook-gke-cloud-sql.md):
+# at deploy time (see runbooks/runbook-gke-cloud-sql.md):
 #   __AR_REPO__   us-central1-docker.pkg.dev/<project>/app
 ---
 apiVersion: apps/v1

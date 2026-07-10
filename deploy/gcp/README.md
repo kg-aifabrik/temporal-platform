@@ -3,7 +3,7 @@
 The production deployment uses the **same Helm chart and topology** as the local
 setup. Only the surrounding infrastructure and a few values change.
 
-**Verified path:** [`docs/runbook-gke-cloud-sql.md`](../../docs/runbook-gke-cloud-sql.md)
+**Verified path:** [`runbooks/runbook-gke-cloud-sql.md`](../../runbooks/runbook-gke-cloud-sql.md)
 is the step-by-step procedure (validated on `dev-fop` against Cloud SQL with IAM
 database auth), and [`gke-values.yaml`](gke-values.yaml) is the real values file
 it installs. This README is the *why* behind those — what changes from local and
